@@ -15,22 +15,22 @@ public class BusiKnowledgeGraphController {
     @Autowired
     private BusiKnowledgeGraphService busiKnowledgeGraphService;
 
-    @GetMapping("/list")
+    @GetMapping
     public Result<List<BusiKnowledgeGraph>> list() {
         return Result.success(busiKnowledgeGraphService.list());
     }
 
-    @PostMapping("/save")
+    @PostMapping
     public Result<Boolean> save(@RequestBody BusiKnowledgeGraph busiKnowledgeGraph) {
         return Result.success(busiKnowledgeGraphService.save(busiKnowledgeGraph));
     }
 
-    @PutMapping("/update")
+    @PutMapping
     public Result<Boolean> update(@RequestBody BusiKnowledgeGraph busiKnowledgeGraph) {
         return Result.success(busiKnowledgeGraphService.updateById(busiKnowledgeGraph));
     }
 
-    @DeleteMapping("/delete/{id}")
+    @DeleteMapping("/{id}")
     public Result<Boolean> delete(@PathVariable Long id) {
         return Result.success(busiKnowledgeGraphService.removeById(id));
     }

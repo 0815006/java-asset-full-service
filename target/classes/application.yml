@@ -12,6 +12,9 @@ spring:
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai
+  data:
+    solr:
+      host: http://localhost:8983/solr
 
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml
@@ -25,3 +28,12 @@ mybatis-plus:
       logic-delete-field: deleted
       logic-delete-value: 1
       logic-not-delete-value: 0
+
+file:
+  upload-dir: uploads
+
+storage:
+  location:
+    public: uploads/public
+    internal: uploads/internal
+    confidential: uploads/confidential

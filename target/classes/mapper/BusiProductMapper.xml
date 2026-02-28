@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.asset.mapper.BusiProductMapper">
+
+    <select id="selectProductList" resultType="com.asset.dto.BusiProductDTO">
+        SELECT
+            p.id,
+            p.name,
+            p.team_id,
+            t.name AS team_name,
+            p.domain_id,
+            d.name AS domain_name,
+            p.owner_id,
+            u.username AS owner_name,
+            p.asset_count,
+            p.status,
+            p.last_update,
+            p.created_at
+        FROM busi_product p
+        LEFT JOIN sys_team t ON p.team_id = t.id
+        LEFT JOIN sys_domain d ON p.domain_id = d.id
+        LEFT JOIN sys_user u ON p.owner_id = u.id
+        <where>
+            <if test="query.keyword != null and query.keyword != ''">
+                AND (p.name LIKE CONCAT('%', #{query.keyword}, '%') OR t.name LIKE CONCAT('%', #{query.keyword}, '%'))
+            </if>
+            <if test="query.teamId != null">
+                AND p.team_id = #{query.teamId}
+            </if>
+            <if test="query.domainId != null">
+                AND p.domain_id = #{query.domainId}
+            </if>
+            <if test="query.status != null and query.status != ''">
+                AND p.status = #{query.status}
+            </if>
+        </where>
+        ORDER BY p.last_update DESC
+    </select>
+
+</mapper>

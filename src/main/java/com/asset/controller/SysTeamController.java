@@ -15,22 +15,22 @@ public class SysTeamController {
     @Autowired
     private SysTeamService sysTeamService;
 
-    @GetMapping("/list")
+    @GetMapping
     public Result<List<SysTeam>> list() {
         return Result.success(sysTeamService.list());
     }
 
-    @PostMapping("/save")
+    @PostMapping
     public Result<Boolean> save(@RequestBody SysTeam sysTeam) {
         return Result.success(sysTeamService.save(sysTeam));
     }
 
-    @PutMapping("/update")
+    @PutMapping
     public Result<Boolean> update(@RequestBody SysTeam sysTeam) {
         return Result.success(sysTeamService.updateById(sysTeam));
     }
 
-    @DeleteMapping("/delete/{id}")
+    @DeleteMapping("/{id}")
     public Result<Boolean> delete(@PathVariable Long id) {
         return Result.success(sysTeamService.removeById(id));
     }

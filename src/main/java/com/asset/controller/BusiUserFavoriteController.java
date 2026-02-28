@@ -15,22 +15,22 @@ public class BusiUserFavoriteController {
     @Autowired
     private BusiUserFavoriteService busiUserFavoriteService;
 
-    @GetMapping("/list")
+    @GetMapping
     public Result<List<BusiUserFavorite>> list() {
         return Result.success(busiUserFavoriteService.list());
     }
 
-    @PostMapping("/save")
+    @PostMapping
     public Result<Boolean> save(@RequestBody BusiUserFavorite busiUserFavorite) {
         return Result.success(busiUserFavoriteService.save(busiUserFavorite));
     }
 
-    @PutMapping("/update")
+    @PutMapping
     public Result<Boolean> update(@RequestBody BusiUserFavorite busiUserFavorite) {
         return Result.success(busiUserFavoriteService.updateById(busiUserFavorite));
     }
 
-    @DeleteMapping("/delete/{id}")
+    @DeleteMapping("/{id}")
     public Result<Boolean> delete(@PathVariable Long id) {
         return Result.success(busiUserFavoriteService.removeById(id));
     }

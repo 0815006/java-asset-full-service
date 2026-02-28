@@ -15,22 +15,22 @@ public class SysDomainController {
     @Autowired
     private SysDomainService sysDomainService;
 
-    @GetMapping("/list")
+    @GetMapping
     public Result<List<SysDomain>> list() {
         return Result.success(sysDomainService.list());
     }
 
-    @PostMapping("/save")
+    @PostMapping
     public Result<Boolean> save(@RequestBody SysDomain sysDomain) {
         return Result.success(sysDomainService.save(sysDomain));
     }
 
-    @PutMapping("/update")
+    @PutMapping
     public Result<Boolean> update(@RequestBody SysDomain sysDomain) {
         return Result.success(sysDomainService.updateById(sysDomain));
     }
 
-    @DeleteMapping("/delete/{id}")
+    @DeleteMapping("/{id}")
     public Result<Boolean> delete(@PathVariable Long id) {
         return Result.success(sysDomainService.removeById(id));
     }
