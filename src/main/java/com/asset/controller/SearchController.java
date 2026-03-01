@@ -21,8 +21,9 @@ public class SearchController {
     @GetMapping
     public Result<List<Map<String, Object>>> search(
             @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Long productId,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int size) {
-        return searchService.search(keyword, page, size);
+        return searchService.search(keyword, productId, page, size);
     }
 }

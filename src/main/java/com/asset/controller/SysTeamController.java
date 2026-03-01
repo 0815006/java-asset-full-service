@@ -15,7 +15,7 @@ public class SysTeamController {
     @Autowired
     private SysTeamService sysTeamService;
 
-    @GetMapping
+    @GetMapping("/list")
     public Result<List<SysTeam>> list() {
         return Result.success(sysTeamService.list());
     }

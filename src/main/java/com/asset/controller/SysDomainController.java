@@ -15,7 +15,7 @@ public class SysDomainController {
     @Autowired
     private SysDomainService sysDomainService;
 
-    @GetMapping
+    @GetMapping("/list")
     public Result<List<SysDomain>> list() {
         return Result.success(sysDomainService.list());
     }

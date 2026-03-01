@@ -70,13 +70,24 @@ public class SearchServiceImpl implements SearchService {
     }
 
     @Override
-    public Result<List<Map<String, Object>>> search(String keyword, int page, int size) {
+    public Result<List<Map<String, Object>>> search(String keyword, Long productId, int page, int size) {
         try {
             SolrQuery query = new SolrQuery();
+            StringBuilder queryStr = new StringBuilder();
+            
             if (keyword == null || keyword.trim().isEmpty()) {
-                query.setQuery("*:*");
+                queryStr.append("*:*");
             } else {
-                query.setQuery("text:" + keyword);
+                queryStr.append("text:").append(keyword);
+            }
+            
+            if (productId != null) {
+                queryStr.append(" AND product_id:").append(productId);
+            }
+            
+            query.setQuery(queryStr.toString());
+            
+            if (keyword != null && !keyword.trim().isEmpty()) {
                 query.setHighlight(true);
                 query.addHighlightField("text");
                 query.setHighlightSimplePre("<em style='color:red'>");

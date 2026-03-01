@@ -16,7 +16,7 @@ public class BusiProductController {
     @Autowired
     private BusiProductService busiProductService;
 
-    @GetMapping
+    @GetMapping("/list")
     public Result<IPage<BusiProductDTO>> list(ProductQueryDTO query) {
         return Result.success(busiProductService.getProductList(query));
     }

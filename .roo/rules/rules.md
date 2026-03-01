@@ -1,4 +1,9 @@
 
+# 项目基础信息与目录结构
+当前工作区是一个完整的前后端分离全栈项目。
+- **前端目录**：`web-asset-full-vue`
+- **后端目录**：`java-asset-full-service`
+
 # 全局工程规范
 你是一个全栈开发专家。请严格遵守以下前后端技术栈要求：
 # Role: Senior Full-Stack Engineer (Spring Boot & Vue 3 Expert)

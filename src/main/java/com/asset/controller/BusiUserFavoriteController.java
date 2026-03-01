@@ -15,7 +15,7 @@ public class BusiUserFavoriteController {
     @Autowired
     private BusiUserFavoriteService busiUserFavoriteService;
 
-    @GetMapping
+    @GetMapping("/list")
     public Result<List<BusiUserFavorite>> list() {
         return Result.success(busiUserFavoriteService.list());
     }

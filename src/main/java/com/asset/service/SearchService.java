@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 public interface SearchService {
-    Result<List<Map<String, Object>>> search(String keyword, int page, int size);
+    Result<List<Map<String, Object>>> search(String keyword, Long productId, int page, int size);
 
     void index(com.asset.entity.AssetNode node);
     

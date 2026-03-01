@@ -15,7 +15,7 @@ public class BusiKnowledgeGraphController {
     @Autowired
     private BusiKnowledgeGraphService busiKnowledgeGraphService;
 
-    @GetMapping
+    @GetMapping("/list")
     public Result<List<BusiKnowledgeGraph>> list() {
         return Result.success(busiKnowledgeGraphService.list());
     }

@@ -107,7 +107,7 @@ public class AssetNodeController {
         return Result.success(true);
     }
 
-    @GetMapping
+    @GetMapping("/list")
     public Result<List<AssetNode>> list() {
         return Result.success(assetNodeService.list());
     }
