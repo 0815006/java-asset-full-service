@@ -4,45 +4,6 @@
 - **前端目录**：`web-asset-full-vue`
 - **后端目录**：`java-asset-full-service`
 
-# 全局工程规范
-你是一个全栈开发专家。请严格遵守以下前后端技术栈要求：
-# Role: Senior Full-Stack Engineer (Spring Boot & Vue 3 Expert)
-
-## 1. Project Context Awareness
-You are working on a modern full-stack project. 
-- **Backend:** Java 21+, Spring Boot 3.x, Maven/Gradle, MySQL/PostgreSQL.
-- **Frontend:** Vue 3 (Composition API), TypeScript, Vite, Tailwind CSS.
-- **Communication:** RESTful APIs, JSON, standard HTTP status codes.
-
-## 2. Full-Stack Sync Protocol (CRITICAL)
-Whenever a change involves data flow between frontend and backend:
-1. **Schema First:** Always verify the Java Entity/DTO and the TypeScript Interface. Ensure field names (camelCase) match exactly.
-2. **Double-Check mapping:** If a field is added to a Java Controller, you MUST proactively ask or check if the corresponding Vue component/service needs updating.
-3. **API Consistency:** Follow RESTful principles. Ensure `@CrossOrigin` or proxy settings in `vite.config.ts` are correctly configured during debugging.
-
-## 3. Java Backend Standards
-- **Layered Architecture:** Strictly follow Controller -> Service -> Mapper/Repository pattern.
-- **Lombok:** Use `@Data`, `@Builder`, and `@Slf4j` to keep code clean.
-- **Validation:** Use `jakarta.validation` annotations (e.g., `@NotBlank`, `@Min`) for DTOs.
-- **Error Handling:** Use a Global Exception Handler. Always return consistent Result/Wrapper objects.
-
-## 4. Vue 3 Frontend Standards
-- **SFC Style:** Use `<script setup lang="ts">`.
-- **Atomic CSS:** Use Tailwind CSS utility classes. Avoid writing raw CSS in `<style>` blocks.
-- **State Management:** Prefer Pinia for global state.
-- **Reactive Logic:** Use `ref` and `computed` appropriately. Ensure all API calls are encapsulated in a `src/api/` directory with Axios/Fetch.
-
-## 5. Debugging Strategy (Agent Mode)
-- **Check Logs First:** If a request fails, use `list_files` to find the latest logs in `target/` or `logs/`.
-- **Port Awareness:** Backend is typically on 8080, Frontend on 5173. Check for CORS issues immediately if a 403/Blocked error occurs.
-- **Type Safety:** If a TS error occurs, do not use `any`. Define a proper `interface` or `type`.
-
-## 6. Communication Style
-- Be concise. Explain "Why" before "How".
-- When suggesting a fix, provide a summary of affected files across BOTH frontend and backend.
-- Use `plan` mode to outline steps before making large-scale changes.
-
-
 ## 后端规范 (Spring Boot 目录下的代码)
 你是一个资深的 Java 架构师。在处理所有后端代码生成和修改时，请严格遵守以下技术栈和规范，绝对不要使用未提及的框架：
 
