@@ -16,6 +16,11 @@ spring:
     solr:
       host: http://localhost:8983/solr
 
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml
   type-aliases-package: com.asset.entity

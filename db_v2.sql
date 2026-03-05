@@ -1,0 +1,164 @@
+-- ----------------------------
+-- Database Migration Script V2.0
+-- Based on PRD V2.1
+-- ----------------------------
+
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- Drop existing tables to ensure clean state
+DROP TABLE IF EXISTS `sys_user`;
+DROP TABLE IF EXISTS `sys_role`;
+DROP TABLE IF EXISTS `sys_user_role`;
+DROP TABLE IF EXISTS `sys_menu`;
+DROP TABLE IF EXISTS `sys_role_menu`;
+DROP TABLE IF EXISTS `sys_dept`;
+DROP TABLE IF EXISTS `sys_post`;
+DROP TABLE IF EXISTS `sys_user_post`;
+DROP TABLE IF EXISTS `sys_dict_type`;
+DROP TABLE IF EXISTS `sys_dict_data`;
+DROP TABLE IF EXISTS `sys_config`;
+DROP TABLE IF EXISTS `sys_logininfor`;
+DROP TABLE IF EXISTS `sys_oper_log`;
+DROP TABLE IF EXISTS `sys_notice`;
+DROP TABLE IF EXISTS `busi_product`;
+DROP TABLE IF EXISTS `busi_knowledge_graph`;
+DROP TABLE IF EXISTS `busi_user_favorite`;
+DROP TABLE IF EXISTS `asset_node`;
+DROP TABLE IF EXISTS `asset_file_version`;
+DROP TABLE IF EXISTS `sys_domain`;
+DROP TABLE IF EXISTS `sys_team`;
+
+-- Drop new tables if they exist (re-run safety)
+DROP TABLE IF EXISTS `user`;
+DROP TABLE IF EXISTS `product`;
+DROP TABLE IF EXISTS `user_favorite_product`;
+DROP TABLE IF EXISTS `asset_file`;
+DROP TABLE IF EXISTS `edit_lock`;
+
+-- ----------------------------
+-- 1. Table structure for user (极简用户表)
+-- ----------------------------
+CREATE TABLE `user` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键自增',
+  `username` VARCHAR(50) NOT NULL COMMENT '登录账号',
+  `password_hash` VARCHAR(255) NOT NULL COMMENT '密码Hash',
+  `real_name` VARCHAR(50) NOT NULL COMMENT '真实姓名 (用于前端防泄露水印)',
+  `emp_no` VARCHAR(50) NOT NULL COMMENT '工号 (用于前端防泄露水印)',
+  `role_type` TINYINT NOT NULL DEFAULT 3 COMMENT '全局角色：1=管理员, 2=测试经理, 3=普通用户',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `is_deleted` TINYINT(1) NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_username` (`username`),
+  UNIQUE KEY `uk_emp_no` (`emp_no`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='极简用户身份表';
+
+-- ----------------------------
+-- 2. Table structure for product (产品域物理隔离表)
+-- ----------------------------
+CREATE TABLE `product` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `product_name` VARCHAR(100) NOT NULL COMMENT '产品名称 (如: 核心业务系统)',
+  `team_name` VARCHAR(100) NOT NULL COMMENT '归属团队',
+  `domain_name` VARCHAR(100) NOT NULL COMMENT '归属领域 (支撑产品卡片按领域分组)',
+  `owner_id` BIGINT NOT NULL COMMENT '负责人ID (关联 user.id)',
+  `asset_count` INT NOT NULL DEFAULT 0 COMMENT '资产统计冗余字段 (供前端极速展示)',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `is_deleted` TINYINT(1) NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  KEY `idx_owner_id` (`owner_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='产品域隔离表';
+
+-- ----------------------------
+-- 3. Table structure for user_favorite_product (用户产品收藏关联表 - V2.1新增)
+-- ----------------------------
+CREATE TABLE `user_favorite_product` (
+  `user_id` BIGINT NOT NULL,
+  `product_id` BIGINT NOT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`user_id`, `product_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户收藏产品表';
+
+-- ----------------------------
+-- 4. Table structure for asset_file (核心资产树表 - 💡含防爆物化路径)
+-- ----------------------------
+CREATE TABLE `asset_file` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `product_id` BIGINT NOT NULL COMMENT '归属产品ID (0=公共/管理专区)',
+  `parent_id` BIGINT NOT NULL DEFAULT 0 COMMENT '父节点ID (0=产品根目录)',
+  `tree_path` VARCHAR(255) NOT NULL DEFAULT '' COMMENT '物化路径(如 /0/1001/1002/，极速定位防爆)',
+  `node_type` TINYINT NOT NULL COMMENT '1=文件夹, 2=文件',
+  `file_name` VARCHAR(255) NOT NULL COMMENT '文件夹名或完整文件名(含后缀)',
+  `ext` VARCHAR(20) NOT NULL DEFAULT '' COMMENT '文件扩展名 (如 md, docx, pdf)',
+  `file_size` BIGINT NOT NULL DEFAULT 0 COMMENT '文件大小 (Bytes)',
+  `version_no` INT NOT NULL DEFAULT 1 COMMENT '版本号 (如 1=V1.0)',
+  `is_latest` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否最新版 (1=最新, 0=历史)',
+  `local_path` VARCHAR(500) NOT NULL DEFAULT '' COMMENT '本地存储绝对/相对路径',
+  `pdf_path` VARCHAR(500) NOT NULL DEFAULT '' COMMENT '降级转码的PDF副本路径',
+  `solr_id` VARCHAR(100) NOT NULL DEFAULT '' COMMENT '全文检索 Solr Document ID',
+  `parse_status` TINYINT NOT NULL DEFAULT 0 COMMENT '异步解析: 0=无需, 1=排队, 2=解析, 3=成功, 4=失败',
+  `created_by` BIGINT NOT NULL COMMENT '上传人/创建人ID',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `is_deleted` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '全局逻辑软删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_tree_search` (`product_id`, `parent_id`, `is_latest`, `is_deleted`),
+  KEY `idx_tree_path` (`tree_path`),
+  KEY `idx_solr_id` (`solr_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='核心资产无限级树表';
+
+-- ----------------------------
+-- 5. Table structure for edit_lock (并发协同编辑锁表)
+-- ----------------------------
+CREATE TABLE `edit_lock` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `asset_file_id` BIGINT NOT NULL COMMENT '被锁定的文件ID',
+  `lock_ticket` VARCHAR(64) NOT NULL COMMENT '防幽灵覆盖的凭证(UUID)',
+  `locked_by` BIGINT NOT NULL COMMENT '持锁用户ID',
+  `locked_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `expires_at` DATETIME NOT NULL COMMENT '锁过期时间(心跳刷新)',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `is_deleted` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '锁释放标记(1=主动释放或系统回收)',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_asset_file_id` (`asset_file_id`),
+  UNIQUE KEY `uk_lock_ticket` (`lock_ticket`),
+  KEY `idx_expires_at` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Markdown并发协同编辑独占锁表';
+
+-- ----------------------------
+-- Initial Data
+-- ----------------------------
+
+-- Users
+INSERT INTO `user` (`id`, `username`, `password_hash`, `real_name`, `emp_no`, `role_type`) VALUES
+(1, 'admin', 'e10adc3949ba59abbe56e057f20f883e', '系统管理员', 'ADMIN001', 1),
+(2, 'chendong', 'e10adc3949ba59abbe56e057f20f883e', '陈东', 'NO.9527', 2),
+(3, 'user1', 'e10adc3949ba59abbe56e057f20f883e', '张三', 'USER001', 3);
+
+-- Products
+INSERT INTO `product` (`id`, `product_name`, `team_name`, `domain_name`, `owner_id`, `asset_count`) VALUES
+(1, '核心交易平台', '交易技术部', '金融核心域', 2, 10),
+(2, '支付网关系统', '支付技术部', '支付域', 2, 5),
+(3, '用户中心', '基础架构部', '基础域', 2, 8);
+
+-- Asset File (Root Folders for Products)
+-- Product 1 Roots
+INSERT INTO `asset_file` (`product_id`, `parent_id`, `tree_path`, `node_type`, `file_name`, `created_by`) VALUES
+(1, 0, '/0/1001/', 1, '产品功能全景', 1),
+(1, 0, '/0/1002/', 1, '产品架构', 1),
+(1, 0, '/0/1003/', 1, '产品缺陷', 1),
+(1, 0, '/0/1004/', 1, '业务知识', 1),
+(1, 0, '/0/1005/', 1, '其他支持类', 1);
+
+-- Tech Zone Root (Product ID 0)
+INSERT INTO `asset_file` (`product_id`, `parent_id`, `tree_path`, `node_type`, `file_name`, `created_by`) VALUES
+(0, 0, '/0/2001/', 1, '测试技术及工艺专区', 1);
+
+-- Mgmt Zone Root (Product ID 0)
+INSERT INTO `asset_file` (`product_id`, `parent_id`, `tree_path`, `node_type`, `file_name`, `created_by`) VALUES
+(0, 0, '/0/3001/', 1, '测试管理专区', 1);
+
+SET FOREIGN_KEY_CHECKS = 1;

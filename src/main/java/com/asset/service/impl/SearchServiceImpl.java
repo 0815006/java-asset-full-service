@@ -1,24 +1,23 @@
 package com.asset.service.impl;
 
 import com.asset.common.Result;
+import com.asset.entity.AssetFile;
 import com.asset.service.SearchService;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrDocumentList;
+import org.apache.solr.common.SolrInputDocument;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
-import org.apache.solr.common.SolrInputDocument;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 
 @Service
 public class SearchServiceImpl implements SearchService {
@@ -27,43 +26,40 @@ public class SearchServiceImpl implements SearchService {
     private SolrClient solrClient;
 
     @Override
-    public void index(com.asset.entity.AssetNode node) {
+    public void index(AssetFile node) {
         try {
             SolrInputDocument doc = new SolrInputDocument();
             doc.addField("id", node.getId().toString());
-            doc.addField("name", node.getName());
-            doc.addField("zone_type", node.getZoneType());
+            doc.addField("name", node.getFileName());
+            
             if (node.getProductId() != null) {
                 doc.addField("product_id", node.getProductId());
             }
             
-            // Simple content extraction for text files
             String content = "";
             try {
-                if (node.getFilePath() != null && (node.getName().endsWith(".txt") || node.getName().endsWith(".md"))) {
-                    content = new String(Files.readAllBytes(Paths.get(node.getFilePath())));
+                if (node.getLocalPath() != null && (node.getFileName().endsWith(".txt") || node.getFileName().endsWith(".md"))) {
+                    content = new String(Files.readAllBytes(Paths.get(node.getLocalPath())));
                 } else {
-                    content = "File content for " + node.getName(); // Placeholder for binary files
+                    content = "File content for " + node.getFileName();
                 }
             } catch (Exception e) {
                 content = "Error reading content";
             }
             doc.addField("text", content);
 
-            solrClient.add("asset_core", doc);
-            solrClient.commit("asset_core");
+            solrClient.add("file_search", doc);
+            solrClient.commit("file_search");
         } catch (Exception e) {
             e.printStackTrace();
-            // Log error but don't block main flow? Or throw?
-            // For now, print stack trace
         }
     }
 
     @Override
     public void delete(Long id) {
         try {
-            solrClient.deleteById("asset_core", id.toString());
-            solrClient.commit("asset_core");
+            solrClient.deleteById("file_search", id.toString());
+            solrClient.commit("file_search");
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -98,7 +94,7 @@ public class SearchServiceImpl implements SearchService {
             query.setStart((page - 1) * size);
             query.setRows(size);
 
-            QueryResponse response = solrClient.query("asset_core", query);
+            QueryResponse response = solrClient.query("file_search", query);
             SolrDocumentList results = response.getResults();
             Map<String, Map<String, List<String>>> highlighting = response.getHighlighting();
 
