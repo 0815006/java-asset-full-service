@@ -35,7 +35,7 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 file:
-  upload-dir: uploads
+  upload-dir: D:/data/asset_files
 
 storage:
   location:

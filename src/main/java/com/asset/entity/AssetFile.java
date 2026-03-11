@@ -43,6 +43,7 @@ public class AssetFile {
      */
     private Integer parseStatus;
 
+    @TableField(fill = FieldFill.INSERT)
     private Long createdBy;
 
     @TableField(fill = FieldFill.INSERT)
@@ -57,6 +58,9 @@ public class AssetFile {
     // Transient fields
     @TableField(exist = false)
     private Boolean hasChildren;
+
+    @TableField(exist = false)
+    private Integer subFolderFlag; // 1=有子文件夹, 0=无子文件夹
 
     @TableField(exist = false)
     private Object currentUserPermission;

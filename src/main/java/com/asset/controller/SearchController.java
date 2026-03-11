@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/search")
+@RequestMapping("/search")
 @CrossOrigin
 public class SearchController {
 

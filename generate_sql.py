@@ -15,9 +15,6 @@ def generate_sql():
     
     # Users
     sql.append("-- Users")
-    # Password hash for '123456' (BCrypt) - using a placeholder or a known hash
-    # Let's use the one from previous file: e10adc3949ba59abbe56e057f20f883e (MD5 for 123456)
-    # But LoginController uses simple check or whatever. Let's stick to what was there.
     password_hash = "e10adc3949ba59abbe56e057f20f883e" 
     sql.append(f"INSERT INTO `user` (`id`, `username`, `password_hash`, `real_name`, `emp_no`, `role_type`) VALUES")
     sql.append(f"(1, 'admin', '{password_hash}', '系统管理员', 'ADMIN001', 1),")
@@ -30,6 +27,24 @@ def generate_sql():
     sql.append("-- Products")
     teams = ["测试一团队", "测试二团队", "测试三团队", "测试四团队", "性能及非功能测试团队"]
     domains = ["金融核心域", "供应链域", "数据智能域", "基础架构域", "客户服务域"]
+    banking_systems = [
+        "核心银行系统", "个人网银系统", "企业网银系统", "手机银行APP", "贷款管理系统",
+        "信用卡业务系统", "支付结算系统", "风险预警系统", "反洗钱监测系统", "客户关系管理系统(CRM)",
+        "资产负债管理系统", "票据业务系统", "外汇交易系统", "期货交易系统", "理财销售系统",
+        "柜面操作系统", "征信管理系统", "中间业务平台", "数据仓库(EDW)", "报表统计系统",
+        "银企直连系统", "ATM终端管理系统", "POS收单系统", "电子档案管理系统", "人力资源管理系统",
+        "财务核算系统", "办公自动化系统(OA)", "审计管理系统", "知识库管理系统", "呼叫中心系统",
+        "移动展业系统", "供应链金融平台", "普惠金融系统", "同业拆借系统", "债券交易系统",
+        "基金代销系统", "黄金交易系统", "保管箱管理系统", "押品管理系统", "额度管理系统",
+        "绩效考核系统", "培训管理系统", "党建管理系统", "档案影像系统", "印章管理系统",
+        "安全认证系统", "统一门户系统", "单点登录系统", "消息推送平台", "日志审计系统",
+        "漏洞扫描系统", "堡垒机系统", "防火墙管理系统", "入侵检测系统", "态势感知平台",
+        "云管理平台", "容器云平台", "微服务治理平台", "分布式数据库集群", "分布式缓存系统",
+        "分布式消息队列", "分布式事务框架", "分布式配置中心", "分布式调度系统", "分布式文件系统",
+        "大数据计算平台", "流式计算引擎", "机器学习平台", "图数据库系统", "全文检索系统",
+        "区块链存证平台", "生物识别认证系统", "智能客服机器人", "智能投顾系统", "智能风控引擎",
+        "智能营销平台", "智能审计系统", "智能运维平台", "智能监控系统", "智能报表系统"
+    ]
     
     product_values = []
     for i in range(1, 81):
@@ -37,7 +52,8 @@ def generate_sql():
         domain = domains[i % 5]
         owner_id = 2 # Chendong
         asset_count = random.randint(5, 50)
-        product_values.append(f"({i}, '产品{i}', '{team}', '{domain}', {owner_id}, {asset_count})")
+        product_name = banking_systems[i-1]
+        product_values.append(f"({i}, '{product_name}', '{team}', '{domain}', {owner_id}, {asset_count})")
     
     sql.append(f"INSERT INTO `product` (`id`, `product_name`, `team_name`, `domain_name`, `owner_id`, `asset_count`) VALUES")
     sql.append(",\n".join(product_values) + ";")
@@ -48,26 +64,6 @@ def generate_sql():
     asset_values = []
     asset_id_counter = 1000
     
-    # Helper to add asset
-    def add_asset(id, pid, parent_id, name, type=1):
-        # Calculate tree path. 
-        # If parent_id is 0, path is /pid/id/
-        # If parent_id is not 0, we need parent's path. 
-        # This is hard in a simple script without tracking.
-        # Let's assume a simple structure where we know the parent path.
-        
-        # For root nodes (parent_id=0): /pid/id/
-        # For child nodes: parent_path + id/
-        
-        path = ""
-        if parent_id == 0:
-            path = f"/{pid}/{id}/"
-        else:
-            # Find parent in our list? No, too slow.
-            # We can pass parent_path.
-            pass
-        return f"({id}, {pid}, {parent_id}, '{path}', {type}, '{name}', 1)"
-
     # Tech Zone (Product 0)
     tech_root_id = asset_id_counter
     asset_id_counter += 1
@@ -120,7 +116,6 @@ def generate_sql():
         for folder in product_folders:
             fid = asset_id_counter
             asset_id_counter += 1
-            # Product folders are roots for that product
             asset_values.append(f"({fid}, {pid}, 0, '/{pid}/{fid}/', 1, '{folder}', 1)")
 
     sql.append(f"INSERT INTO `asset_file` (`id`, `product_id`, `parent_id`, `tree_path`, `node_type`, `file_name`, `created_by`) VALUES")
@@ -132,5 +127,11 @@ def generate_sql():
     return "\n".join(sql)
 
 if __name__ == "__main__":
+    import sys
+    # Ensure stdout uses utf-8
+    if sys.version_info[0] >= 3:
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    
     with open("init_data.sql", "w", encoding="utf-8") as f:
         f.write(generate_sql())
