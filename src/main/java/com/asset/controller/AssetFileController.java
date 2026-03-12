@@ -29,6 +29,15 @@ public class AssetFileController {
     private SearchService searchService;
 
     private static final Set<String> syncingKeys = Collections.synchronizedSet(new HashSet<>());
+    private static final Map<String, SyncProgress> syncProgressMap = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public static class SyncProgress {
+        public int totalFiles = 0;
+        public int processedFiles = 0;
+        public String currentFileName = "";
+        public boolean isFinished = false;
+        public String errorMsg = null;
+    }
 
     @org.springframework.beans.factory.annotation.Value("${file.upload-dir}")
     private String uploadDir;
@@ -121,6 +130,20 @@ public class AssetFileController {
         }
     }
 
+    private int countFiles(java.io.File dir) {
+        int count = 0;
+        java.io.File[] files = dir.listFiles();
+        if (files != null) {
+            for (java.io.File f : files) {
+                count++;
+                if (f.isDirectory()) {
+                    count += countFiles(f);
+                }
+            }
+        }
+        return count;
+    }
+
     @PostMapping("/sync-extra")
     public Result<Void> syncExtra(@RequestBody Map<String, Object> body) {
         String type = (String) body.get("type");
@@ -134,59 +157,93 @@ public class AssetFileController {
             return Result.error("该专区/产品正在入库中，请勿重复点击");
         }
 
-        try {
-            // 1. 确定基础物理路径
-            String basePhysicalPath = uploadDir + "/" + type;
-            if ("product_zone".equals(type)) {
-                basePhysicalPath += "/" + productId;
-            }
-            java.io.File baseDir = new java.io.File(basePhysicalPath);
-            if (!baseDir.exists()) {
-                return Result.error("物理根目录不存在");
-            }
+        // 初始化进度
+        SyncProgress progress = new SyncProgress();
+        syncProgressMap.put(syncKey, progress);
 
-            // 2. 获取该单元的所有数据库记录
-            List<AssetFile> dbFiles = assetFileService.list(new LambdaQueryWrapper<AssetFile>()
-                    .eq(AssetFile::getProductId, productId)
-                    .eq(AssetFile::getIsLatest, 1));
-
-            Long startParentId = 0L;
-            String parentTreePath = "/0/";
-
-            if (productId == 0) {
-                List<AssetFile> zoneRoots = assetFileService.list(new LambdaQueryWrapper<AssetFile>()
-                        .eq(AssetFile::getParentId, 0)
-                        .like(AssetFile::getFileName, type.contains("tech") ? "测试技术" : "管理")
-                        .last("limit 1"));
-                AssetFile zoneRoot = zoneRoots.isEmpty() ? null : zoneRoots.get(0);
-                if (zoneRoot != null) {
-                    startParentId = zoneRoot.getId();
-                    parentTreePath = zoneRoot.getTreePath();
-                    
-                    List<AssetFile> zoneFiles = assetFileService.list(new LambdaQueryWrapper<AssetFile>()
-                            .like(AssetFile::getTreePath, "/" + zoneRoot.getId() + "/")
-                            .eq(AssetFile::getIsLatest, 1));
-                    dbFiles.clear();
-                    dbFiles.addAll(zoneFiles);
-                    dbFiles.add(zoneRoot);
-                } else {
-                    return Result.error("未找到专区根节点，请先初始化数据");
-                }
-            }
-
-            // 按 parentId 对数据库文件进行分组
-            Map<Long, List<AssetFile>> dbMap = dbFiles.stream().collect(Collectors.groupingBy(AssetFile::getParentId));
-
-            // 3. 递归同步
-            syncRecursive(baseDir, startParentId, parentTreePath, productId, dbMap);
-
-            return Result.success();
-        } finally {
-            syncingKeys.remove(syncKey);
+        // 1. 确定基础物理路径
+        String basePhysicalPath = uploadDir + "/" + type;
+        if ("product_zone".equals(type)) {
+            basePhysicalPath += "/" + productId;
         }
+        java.io.File baseDir = new java.io.File(basePhysicalPath);
+        if (!baseDir.exists()) {
+            syncingKeys.remove(syncKey);
+            return Result.error("物理根目录不存在");
+        }
+
+        // 预先计算总文件数
+        progress.totalFiles = countFiles(baseDir);
+
+        // 异步执行入库
+        Long finalProductId = productId;
+        new Thread(() -> {
+            try {
+                // 2. 获取该单元的所有数据库记录
+                List<AssetFile> dbFiles = assetFileService.list(new LambdaQueryWrapper<AssetFile>()
+                        .eq(AssetFile::getProductId, finalProductId)
+                        .eq(AssetFile::getIsLatest, 1));
+
+                Long startParentId = 0L;
+                String parentTreePath = "/0/";
+
+                if (finalProductId == 0) {
+                    List<AssetFile> zoneRoots = assetFileService.list(new LambdaQueryWrapper<AssetFile>()
+                            .eq(AssetFile::getParentId, 0)
+                            .like(AssetFile::getFileName, type.contains("tech") ? "测试技术" : "管理")
+                            .last("limit 1"));
+                    AssetFile zoneRoot = zoneRoots.isEmpty() ? null : zoneRoots.get(0);
+                    if (zoneRoot != null) {
+                        startParentId = zoneRoot.getId();
+                        parentTreePath = zoneRoot.getTreePath();
+                        
+                        List<AssetFile> zoneFiles = assetFileService.list(new LambdaQueryWrapper<AssetFile>()
+                                .like(AssetFile::getTreePath, "/" + zoneRoot.getId() + "/")
+                                .eq(AssetFile::getIsLatest, 1));
+                        dbFiles.clear();
+                        dbFiles.addAll(zoneFiles);
+                        dbFiles.add(zoneRoot);
+                    } else {
+                        progress.errorMsg = "未找到专区根节点，请先初始化数据";
+                        progress.isFinished = true;
+                        return;
+                    }
+                }
+
+                // 按 parentId 对数据库文件进行分组
+                Map<Long, List<AssetFile>> dbMap = dbFiles.stream().collect(Collectors.groupingBy(AssetFile::getParentId));
+
+                // 3. 递归同步
+                syncRecursive(baseDir, startParentId, parentTreePath, finalProductId, dbMap, progress);
+
+                progress.isFinished = true;
+            } catch (Exception e) {
+                e.printStackTrace();
+                progress.errorMsg = "入库发生异常: " + e.getMessage();
+                progress.isFinished = true;
+            } finally {
+                syncingKeys.remove(syncKey);
+            }
+        }).start();
+
+        return Result.success();
     }
 
-    private void syncRecursive(java.io.File physicalDir, Long dbParentId, String parentTreePath, Long productId, Map<Long, List<AssetFile>> dbMap) {
+    @GetMapping("/sync-progress")
+    public Result<SyncProgress> getSyncProgress(@RequestParam("type") String type, @RequestParam(value = "product_id", required = false) Long productId) {
+        Long pid = productId != null ? productId : 0L;
+        String syncKey = type + ":" + pid;
+        SyncProgress progress = syncProgressMap.get(syncKey);
+        if (progress == null) {
+            // 如果没有进度，说明可能已经完成或者还没开始
+            SyncProgress empty = new SyncProgress();
+            empty.isFinished = true;
+            return Result.success(empty);
+        }
+        return Result.success(progress);
+    }
+
+    private void syncRecursive(java.io.File physicalDir, Long dbParentId, String parentTreePath, Long productId, Map<Long, List<AssetFile>> dbMap, SyncProgress progress) {
         List<AssetFile> dbChildren = dbMap.getOrDefault(dbParentId, new ArrayList<>());
         java.io.File[] physicalChildren = physicalDir.exists() ? physicalDir.listFiles() : new java.io.File[0];
         if (physicalChildren == null) physicalChildren = new java.io.File[0];
@@ -256,8 +313,11 @@ public class AssetFileController {
 
             // 如果是目录，递归处理子目录
             if (isDir && currentDbFile != null) {
-                syncRecursive(pFile, currentDbFile.getId(), currentDbFile.getTreePath(), productId, dbMap);
+                syncRecursive(pFile, currentDbFile.getId(), currentDbFile.getTreePath(), productId, dbMap, progress);
             }
+            
+            progress.processedFiles++;
+            progress.currentFileName = fileName;
         }
     }
 
