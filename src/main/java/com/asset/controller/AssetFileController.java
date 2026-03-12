@@ -10,9 +10,12 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.servlet.http.HttpServletResponse;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 @RestController
 @RequestMapping("/assets")
@@ -24,6 +27,8 @@ public class AssetFileController {
     
     @Autowired
     private SearchService searchService;
+
+    private static final Set<String> syncingKeys = Collections.synchronizedSet(new HashSet<>());
 
     @org.springframework.beans.factory.annotation.Value("${file.upload-dir}")
     private String uploadDir;
@@ -124,50 +129,61 @@ public class AssetFileController {
             productId = Long.valueOf(body.get("product_id").toString());
         }
 
-        // 1. 确定基础物理路径
-        String basePhysicalPath = uploadDir + "/" + type;
-        if ("product_zone".equals(type)) {
-            basePhysicalPath += "/" + productId;
-        }
-        java.io.File baseDir = new java.io.File(basePhysicalPath);
-        if (!baseDir.exists()) {
-            return Result.error("物理根目录不存在");
+        String syncKey = type + ":" + productId;
+        if (!syncingKeys.add(syncKey)) {
+            return Result.error("该专区/产品正在入库中，请勿重复点击");
         }
 
-        // 2. 获取该单元的所有数据库记录
-        List<AssetFile> dbFiles = assetFileService.list(new LambdaQueryWrapper<AssetFile>()
-                .eq(AssetFile::getProductId, productId)
-                .eq(AssetFile::getIsLatest, 1));
-
-        Long startParentId = 0L;
-        String parentTreePath = "/0/";
-
-        if (productId == 0) {
-            AssetFile zoneRoot = assetFileService.getOne(new LambdaQueryWrapper<AssetFile>()
-                    .eq(AssetFile::getParentId, 0)
-                    .like(AssetFile::getFileName, type.contains("tech") ? "测试技术" : "管理"));
-            if (zoneRoot != null) {
-                startParentId = zoneRoot.getId();
-                parentTreePath = zoneRoot.getTreePath();
-                
-                List<AssetFile> zoneFiles = assetFileService.list(new LambdaQueryWrapper<AssetFile>()
-                        .like(AssetFile::getTreePath, "/" + zoneRoot.getId() + "/")
-                        .eq(AssetFile::getIsLatest, 1));
-                dbFiles.clear();
-                dbFiles.addAll(zoneFiles);
-                dbFiles.add(zoneRoot);
-            } else {
-                return Result.error("未找到专区根节点，请先初始化数据");
+        try {
+            // 1. 确定基础物理路径
+            String basePhysicalPath = uploadDir + "/" + type;
+            if ("product_zone".equals(type)) {
+                basePhysicalPath += "/" + productId;
             }
+            java.io.File baseDir = new java.io.File(basePhysicalPath);
+            if (!baseDir.exists()) {
+                return Result.error("物理根目录不存在");
+            }
+
+            // 2. 获取该单元的所有数据库记录
+            List<AssetFile> dbFiles = assetFileService.list(new LambdaQueryWrapper<AssetFile>()
+                    .eq(AssetFile::getProductId, productId)
+                    .eq(AssetFile::getIsLatest, 1));
+
+            Long startParentId = 0L;
+            String parentTreePath = "/0/";
+
+            if (productId == 0) {
+                List<AssetFile> zoneRoots = assetFileService.list(new LambdaQueryWrapper<AssetFile>()
+                        .eq(AssetFile::getParentId, 0)
+                        .like(AssetFile::getFileName, type.contains("tech") ? "测试技术" : "管理")
+                        .last("limit 1"));
+                AssetFile zoneRoot = zoneRoots.isEmpty() ? null : zoneRoots.get(0);
+                if (zoneRoot != null) {
+                    startParentId = zoneRoot.getId();
+                    parentTreePath = zoneRoot.getTreePath();
+                    
+                    List<AssetFile> zoneFiles = assetFileService.list(new LambdaQueryWrapper<AssetFile>()
+                            .like(AssetFile::getTreePath, "/" + zoneRoot.getId() + "/")
+                            .eq(AssetFile::getIsLatest, 1));
+                    dbFiles.clear();
+                    dbFiles.addAll(zoneFiles);
+                    dbFiles.add(zoneRoot);
+                } else {
+                    return Result.error("未找到专区根节点，请先初始化数据");
+                }
+            }
+
+            // 按 parentId 对数据库文件进行分组
+            Map<Long, List<AssetFile>> dbMap = dbFiles.stream().collect(Collectors.groupingBy(AssetFile::getParentId));
+
+            // 3. 递归同步
+            syncRecursive(baseDir, startParentId, parentTreePath, productId, dbMap);
+
+            return Result.success();
+        } finally {
+            syncingKeys.remove(syncKey);
         }
-
-        // 按 parentId 对数据库文件进行分组
-        Map<Long, List<AssetFile>> dbMap = dbFiles.stream().collect(Collectors.groupingBy(AssetFile::getParentId));
-
-        // 3. 递归同步
-        syncRecursive(baseDir, startParentId, parentTreePath, productId, dbMap);
-
-        return Result.success();
     }
 
     private void syncRecursive(java.io.File physicalDir, Long dbParentId, String parentTreePath, Long productId, Map<Long, List<AssetFile>> dbMap) {
@@ -184,42 +200,55 @@ public class AssetFileController {
             AssetFile currentDbFile = null;
 
             if (!dbFileNames.contains(fileName)) {
-                // 数据库中不存在，需要入库
-                AssetFile newFile = new AssetFile();
-                newFile.setProductId(productId);
-                newFile.setParentId(dbParentId);
-                newFile.setFileName(fileName);
-                newFile.setNodeType(isDir ? 1 : 2);
-                newFile.setIsLatest(1);
-                newFile.setVersionNo(1);
-                newFile.setParseStatus(isDir ? 0 : 1);
-                newFile.setCreatedBy(2L); // 默认陈东
-                newFile.setCreatedAt(java.time.LocalDateTime.now());
-                newFile.setUpdatedAt(java.time.LocalDateTime.now());
+                // 再次检查数据库，防止并发导致的重复入库
+                List<AssetFile> existings = assetFileService.list(new LambdaQueryWrapper<AssetFile>()
+                        .eq(AssetFile::getProductId, productId)
+                        .eq(AssetFile::getParentId, dbParentId)
+                        .eq(AssetFile::getFileName, fileName)
+                        .eq(AssetFile::getIsLatest, 1)
+                        .last("limit 1"));
+                AssetFile existing = existings.isEmpty() ? null : existings.get(0);
                 
-                if (!isDir) {
-                    String ext = fileName.contains(".") ? fileName.substring(fileName.lastIndexOf(".") + 1) : "";
-                    newFile.setExt(ext);
-                    newFile.setFileSize(pFile.length());
-                    newFile.setLocalPath(pFile.getAbsolutePath());
-                }
-
-                assetFileService.save(newFile);
-                
-                // 更新 treePath
-                String currentTreePath = parentTreePath + newFile.getId() + "/";
-                newFile.setTreePath(currentTreePath);
-                assetFileService.updateById(newFile);
-                
-                if (!isDir) {
-                    try {
-                        searchService.index(newFile);
-                    } catch (Exception e) {
-                        System.err.println("同步到 Solr 失败: " + e.getMessage());
+                if (existing != null) {
+                    currentDbFile = existing;
+                } else {
+                    // 数据库中不存在，需要入库
+                    AssetFile newFile = new AssetFile();
+                    newFile.setProductId(productId);
+                    newFile.setParentId(dbParentId);
+                    newFile.setFileName(fileName);
+                    newFile.setNodeType(isDir ? 1 : 2);
+                    newFile.setIsLatest(1);
+                    newFile.setVersionNo(1);
+                    newFile.setParseStatus(isDir ? 0 : 1);
+                    newFile.setCreatedBy(2L); // 默认陈东
+                    newFile.setCreatedAt(java.time.LocalDateTime.now());
+                    newFile.setUpdatedAt(java.time.LocalDateTime.now());
+                    
+                    if (!isDir) {
+                        String ext = fileName.contains(".") ? fileName.substring(fileName.lastIndexOf(".") + 1) : "";
+                        newFile.setExt(ext);
+                        newFile.setFileSize(pFile.length());
+                        newFile.setLocalPath(pFile.getAbsolutePath());
                     }
+
+                    assetFileService.save(newFile);
+                    
+                    // 更新 treePath
+                    String currentTreePath = parentTreePath + newFile.getId() + "/";
+                    newFile.setTreePath(currentTreePath);
+                    assetFileService.updateById(newFile);
+                    
+                    if (!isDir) {
+                        try {
+                            searchService.index(newFile);
+                        } catch (Exception e) {
+                            System.err.println("同步到 Solr 失败: " + e.getMessage());
+                        }
+                    }
+                    
+                    currentDbFile = newFile;
                 }
-                
-                currentDbFile = newFile;
             } else {
                 // 数据库中已存在，找到它
                 currentDbFile = dbChildren.stream().filter(f -> f.getFileName().equals(fileName)).findFirst().orElse(null);
@@ -251,9 +280,11 @@ public class AssetFileController {
         
         // 如果是公共专区，我们需要通过根节点进行过滤
         if (pid == 0) {
-            AssetFile zoneRoot = assetFileService.getOne(new LambdaQueryWrapper<AssetFile>()
+            List<AssetFile> zoneRoots = assetFileService.list(new LambdaQueryWrapper<AssetFile>()
                     .eq(AssetFile::getParentId, 0)
-                    .like(AssetFile::getFileName, type.contains("tech") ? "测试技术" : "管理"));
+                    .like(AssetFile::getFileName, type.contains("tech") ? "测试技术" : "管理")
+                    .last("limit 1"));
+            AssetFile zoneRoot = zoneRoots.isEmpty() ? null : zoneRoots.get(0);
             if (zoneRoot != null) {
                 dbFiles = assetFileService.list(new LambdaQueryWrapper<AssetFile>()
                         .like(AssetFile::getTreePath, "/" + zoneRoot.getId() + "/")
@@ -539,19 +570,25 @@ public class AssetFileController {
     }
 
     @PostMapping("/upload")
-    public Result<AssetFile> upload(@RequestParam("file") MultipartFile file, 
-                                    @RequestParam("product_id") Long productId, 
-                                    @RequestParam("parent_id") Long parentId) {
+    public Result<AssetFile> upload(@RequestParam("file") MultipartFile file,
+                                    @RequestParam("product_id") Long productId,
+                                    @RequestParam("parent_id") Long parentId,
+                                    @RequestParam(required = false) String zoneType) {
         // 模拟上传逻辑
         String fileName = file.getOriginalFilename();
-        String ext = fileName.substring(fileName.lastIndexOf(".") + 1);
+        String ext = "";
+        if (fileName != null && fileName.contains(".")) {
+            ext = fileName.substring(fileName.lastIndexOf(".") + 1);
+        }
         
         // 检查是否存在同名文件以进行版本控制
-        AssetFile existing = assetFileService.getOne(new LambdaQueryWrapper<AssetFile>()
+        List<AssetFile> existings = assetFileService.list(new LambdaQueryWrapper<AssetFile>()
             .eq(AssetFile::getProductId, productId)
             .eq(AssetFile::getParentId, parentId)
             .eq(AssetFile::getFileName, fileName)
-            .eq(AssetFile::getIsLatest, 1));
+            .eq(AssetFile::getIsLatest, 1)
+            .last("limit 1"));
+        AssetFile existing = existings.isEmpty() ? null : existings.get(0);
             
         int version = 1;
         if (existing != null) {
@@ -570,7 +607,7 @@ public class AssetFileController {
         newFile.setIsLatest(1);
         newFile.setNodeType(2); // 文件
         newFile.setParseStatus(1); // 排队中
-        newFile.setCreatedBy(2L); // 陈东
+        newFile.setCreatedBy(2L); // 默认陈东
         newFile.setCreatedAt(java.time.LocalDateTime.now());
         newFile.setUpdatedAt(java.time.LocalDateTime.now());
         
@@ -592,7 +629,7 @@ public class AssetFileController {
             String physicalDir = getPhysicalPath(newFile);
             java.io.File dir = new java.io.File(physicalDir);
             if (!dir.exists()) {
-                return Result.error("存储结构异常：目标目录在物理存储中不存在");
+                dir.mkdirs();
             }
             java.io.File dest = new java.io.File(dir, fileName);
             file.transferTo(dest);
@@ -609,17 +646,140 @@ public class AssetFileController {
         return Result.success(newFile);
     }
     
+    @PostMapping("/{id}/update")
+    public Result<AssetFile> updateFile(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
+        AssetFile oldFile = assetFileService.getById(id);
+        if (oldFile == null) return Result.error("原文件不存在");
+        
+        // 1. 标记旧版本为非最新
+        oldFile.setIsLatest(0);
+        assetFileService.updateById(oldFile);
+        
+        // 2. 创建新版本记录
+        AssetFile newFile = new AssetFile();
+        newFile.setProductId(oldFile.getProductId());
+        newFile.setParentId(oldFile.getParentId());
+        newFile.setTreePath(oldFile.getTreePath());
+        newFile.setFileName(oldFile.getFileName());
+        newFile.setExt(oldFile.getExt());
+        newFile.setLocalPath(oldFile.getLocalPath());
+        newFile.setFileSize(file.getSize());
+        newFile.setVersionNo(oldFile.getVersionNo() + 1);
+        newFile.setIsLatest(1);
+        newFile.setNodeType(2);
+        newFile.setParseStatus(1);
+        newFile.setCreatedBy(2L); // 默认陈东
+        newFile.setCreatedAt(java.time.LocalDateTime.now());
+        newFile.setUpdatedAt(java.time.LocalDateTime.now());
+        
+        assetFileService.save(newFile);
+        
+        // 3. 物理覆盖原文件
+        try {
+            java.io.File dest = new java.io.File(oldFile.getLocalPath());
+            file.transferTo(dest);
+        } catch (java.io.IOException e) {
+            return Result.error("物理文件覆盖失败: " + e.getMessage());
+        }
+        
+        // 4. 同步 Solr
+        searchService.index(newFile);
+        
+        return Result.success(newFile);
+    }
+
+    @GetMapping("/{id}/details")
+    public Result<AssetFile> getAssetDetails(@PathVariable Long id) {
+        AssetFile file = assetFileService.getById(id);
+        if (file == null) {
+            return Result.error("File not found");
+        }
+        return Result.success(file);
+    }
+
     @GetMapping("/{id}/detail")
     public Result<AssetFile> detail(@PathVariable Long id) {
         AssetFile file = assetFileService.getById(id);
         if (file == null) return Result.error("文件不存在");
         
-        // 模拟 MD 文件内容
-        if ("md".equalsIgnoreCase(file.getExt())) {
-            // 在实际应用中，从文件系统读取
+        return Result.success(file);
+    }
+
+    @GetMapping("/{id}/view")
+    public void viewFile(@PathVariable Long id, 
+                         @RequestParam(value = "download", required = false, defaultValue = "false") boolean download,
+                         HttpServletResponse response) {
+        System.out.println("收到预览/下载请求，ID=" + id + ", download=" + download);
+        AssetFile file = assetFileService.getById(id);
+        if (file == null) {
+            System.err.println("请求失败：文件记录不存在, ID=" + id);
+            response.setStatus(404);
+            return;
         }
         
-        return Result.success(file);
+        if (file.getLocalPath() == null || file.getLocalPath().isEmpty()) {
+            System.err.println("请求失败：文件物理路径为空, ID=" + id + ", FileName=" + file.getFileName());
+            response.setStatus(404);
+            return;
+        }
+        
+        java.io.File physicalFile = new java.io.File(file.getLocalPath());
+        if (!physicalFile.exists()) {
+            System.err.println("请求失败：物理文件不存在, ID=" + id + ", Path=" + file.getLocalPath());
+            response.setStatus(404);
+            return;
+        }
+        
+        String contentType = "application/octet-stream";
+        String ext = file.getExt();
+        if (ext == null && file.getFileName().contains(".")) {
+            ext = file.getFileName().substring(file.getFileName().lastIndexOf(".") + 1);
+        }
+        
+        if ("pdf".equalsIgnoreCase(ext)) {
+            contentType = "application/pdf";
+        } else if ("jpg".equalsIgnoreCase(ext) || "jpeg".equalsIgnoreCase(ext)) {
+            contentType = "image/jpeg";
+        } else if ("png".equalsIgnoreCase(ext)) {
+            contentType = "image/png";
+        } else if ("gif".equalsIgnoreCase(ext)) {
+            contentType = "image/gif";
+        } else if ("txt".equalsIgnoreCase(ext) || "md".equalsIgnoreCase(ext) || "sql".equalsIgnoreCase(ext) || "log".equalsIgnoreCase(ext) || "sh".equalsIgnoreCase(ext) || "py".equalsIgnoreCase(ext) ||
+                "json".equalsIgnoreCase(ext) || "xml".equalsIgnoreCase(ext) || "java".equalsIgnoreCase(ext) || "js".equalsIgnoreCase(ext) || "css".equalsIgnoreCase(ext) ||
+                "yml".equalsIgnoreCase(ext) || "yaml".equalsIgnoreCase(ext) || "properties".equalsIgnoreCase(ext) || "ini".equalsIgnoreCase(ext) || "conf".equalsIgnoreCase(ext) || "env".equalsIgnoreCase(ext) ||
+                "bat".equalsIgnoreCase(ext) || "cmd".equalsIgnoreCase(ext) || "ts".equalsIgnoreCase(ext) || "vue".equalsIgnoreCase(ext) || "html".equalsIgnoreCase(ext) ||
+                "c".equalsIgnoreCase(ext) || "cpp".equalsIgnoreCase(ext) || "h".equalsIgnoreCase(ext) || "go".equalsIgnoreCase(ext) || "php".equalsIgnoreCase(ext) || "csv".equalsIgnoreCase(ext)) {
+            contentType = "text/plain;charset=UTF-8";
+        }
+        
+        response.setContentType(contentType);
+        
+        if (download) {
+            try {
+                String encodedFileName = java.net.URLEncoder.encode(file.getFileName(), "UTF-8").replaceAll("\\+", "%20");
+                response.setHeader("Content-Disposition", "attachment; filename=\"" + encodedFileName + "\"");
+            } catch (java.io.UnsupportedEncodingException e) {
+                response.setHeader("Content-Disposition", "attachment; filename=\"file\"");
+            }
+        }
+        
+        try (FileInputStream fis = new FileInputStream(physicalFile)) {
+            byte[] buffer = new byte[4096];
+            int len;
+            while ((len = fis.read(buffer)) > 0) {
+                response.getOutputStream().write(buffer, 0, len);
+            }
+            System.out.println("请求处理成功：ID=" + id + ", FileName=" + file.getFileName());
+        } catch (IOException e) {
+            System.err.println("输出失败：ID=" + id + ", Error=" + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    @PostMapping("/callback")
+    public void callback(@RequestBody Map<String, Object> body) {
+        // OnlyOffice 回调，目前仅记录日志
+        System.out.println("收到 OnlyOffice 回调: " + body);
     }
 
     @PostMapping("/download")
@@ -627,30 +787,130 @@ public class AssetFileController {
         List<Long> ids = body.get("file_ids");
         if (ids == null || ids.isEmpty()) return;
         
-        // 红线 8：限制检查
+        // 限制检查
         if (ids.size() > 50) {
             response.setStatus(400);
             try {
+                response.setCharacterEncoding("UTF-8");
+                response.setContentType("application/json");
                 response.getWriter().write("{\"code\": 400, \"message\": \"文件数量过多 (最多 50 个)\"}");
             } catch (IOException e) {}
             return;
         }
         
-        List<AssetFile> files = assetFileService.listByIds(ids);
-        long totalSize = files.stream().mapToLong(AssetFile::getFileSize).sum();
+        List<AssetFile> selectedFiles = assetFileService.listByIds(ids);
+        List<AssetFile> allFilesToDownload = new ArrayList<>();
+        
+        for (AssetFile file : selectedFiles) {
+            if (file.getNodeType() == 1) { // 文件夹
+                // 递归获取文件夹下所有文件
+                List<AssetFile> children = assetFileService.list(new LambdaQueryWrapper<AssetFile>()
+                        .like(AssetFile::getTreePath, "/" + file.getId() + "/")
+                        .eq(AssetFile::getNodeType, 2)
+                        .eq(AssetFile::getIsLatest, 1));
+                allFilesToDownload.addAll(children);
+            } else {
+                allFilesToDownload.add(file);
+            }
+        }
+
+        if (allFilesToDownload.isEmpty()) {
+            response.setStatus(400);
+            try {
+                response.setCharacterEncoding("UTF-8");
+                response.setContentType("application/json");
+                response.getWriter().write("{\"code\": 400, \"message\": \"没有可下载的文件\"}");
+            } catch (IOException e) {}
+            return;
+        }
+
+        long totalSize = allFilesToDownload.stream().mapToLong(f -> f.getFileSize() != null ? f.getFileSize() : 0L).sum();
         if (totalSize > 500 * 1024 * 1024) { // 500MB
              response.setStatus(400);
              try {
+                response.setCharacterEncoding("UTF-8");
+                response.setContentType("application/json");
                 response.getWriter().write("{\"code\": 400, \"message\": \"总大小超过 500MB\"}");
             } catch (IOException e) {}
             return;
         }
         
-        // 模拟下载
-        response.setContentType("application/octet-stream");
-        response.setHeader("Content-Disposition", "attachment; filename=\"download.zip\"");
-        try {
-            response.getWriter().write("模拟文件内容");
-        } catch (IOException e) {}
+        response.setContentType("application/zip");
+        response.setHeader("Content-Disposition", "attachment; filename=\"assets.zip\"");
+        
+        List<String> missingFiles = new ArrayList<>();
+        Set<String> addedPaths = new HashSet<>();
+        Set<Long> processedFileIds = new HashSet<>();
+        
+        try (ZipOutputStream zos = new ZipOutputStream(response.getOutputStream())) {
+            for (AssetFile file : allFilesToDownload) {
+                // 避免重复处理同一个文件记录（例如同时选中了文件夹和其下的文件）
+                if (file.getId() != null && processedFileIds.contains(file.getId())) {
+                    continue;
+                }
+                processedFileIds.add(file.getId());
+
+                String localPath = file.getLocalPath();
+                java.io.File physicalFile = (localPath != null && !localPath.isEmpty()) ? new java.io.File(localPath) : null;
+                
+                if (physicalFile == null || !physicalFile.exists()) {
+                    missingFiles.add(file.getFileName() + " (ID: " + file.getId() + ", 路径: " + (localPath == null ? "空" : localPath) + ")");
+                    continue;
+                }
+
+                // 处理重名问题
+                String fileName = file.getFileName();
+                String zipPath = fileName;
+                int count = 1;
+                while (addedPaths.contains(zipPath)) {
+                    int dotIndex = fileName.lastIndexOf(".");
+                    if (dotIndex != -1) {
+                        zipPath = fileName.substring(0, dotIndex) + "(" + count + ")" + fileName.substring(dotIndex);
+                    } else {
+                        zipPath = fileName + "(" + count + ")";
+                    }
+                    count++;
+                }
+                addedPaths.add(zipPath);
+
+                ZipEntry entry = new ZipEntry(zipPath);
+                zos.putNextEntry(entry);
+                
+                try (FileInputStream fis = new FileInputStream(physicalFile)) {
+                    byte[] buffer = new byte[4096];
+                    int len;
+                    while ((len = fis.read(buffer)) > 0) {
+                        zos.write(buffer, 0, len);
+                    }
+                }
+                zos.closeEntry();
+            }
+            
+            // 始终生成一个下载报告，方便核对
+            ZipEntry reportEntry = new ZipEntry("下载清单报告.txt");
+            zos.putNextEntry(reportEntry);
+            StringBuilder sb = new StringBuilder();
+            sb.append("资产打包下载报告\n");
+            sb.append("================\n");
+            sb.append("生成时间: ").append(java.time.LocalDateTime.now()).append("\n");
+            sb.append("成功打包文件数: ").append(addedPaths.size()).append("\n");
+            sb.append("缺失文件数: ").append(missingFiles.size()).append("\n\n");
+            
+            if (!missingFiles.isEmpty()) {
+                sb.append("缺失文件列表：\n");
+                for (String m : missingFiles) {
+                    sb.append("- ").append(m).append("\n");
+                }
+            } else {
+                sb.append("所有文件均已成功打包。\n");
+            }
+            
+            zos.write(sb.toString().getBytes("UTF-8"));
+            zos.closeEntry();
+            
+            zos.finish();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 }
