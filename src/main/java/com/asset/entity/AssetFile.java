@@ -67,4 +67,10 @@ public class AssetFile {
     
     @TableField(exist = false)
     private String createdByName;
+
+    @TableField(exist = false)
+    private Boolean isNew; // 是否为新文件（根据用户阅读状态判断）
+
+    @TableField(exist = false)
+    private Boolean isStarred; // 是否已收藏
 }

@@ -3,14 +3,18 @@ package com.asset.controller;
 import com.asset.common.Result;
 import com.asset.entity.AssetFile;
 import com.asset.entity.Product;
+import com.asset.entity.AssetHotSearch;
 import com.asset.service.AssetFileService;
 import com.asset.service.ProductService;
 import com.asset.service.SearchService;
+import com.asset.service.AssetHotSearchService;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +35,12 @@ public class SearchController {
     @Autowired
     private ProductService productService;
 
+    @Autowired
+    private AssetHotSearchService assetHotSearchService;
+
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
+
     @GetMapping
     public Result<List<Map<String, Object>>> search(
             @RequestParam(required = false) String keyword,
@@ -38,12 +48,12 @@ public class SearchController {
             @RequestParam(required = false) Long productId,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int size) {
-        
+
         Result<List<Map<String, Object>>> searchResult = searchService.search(keyword, zoneType, productId, page, size);
-        
+
         if (searchResult.getCode() == 200) {
             List<Map<String, Object>> results = searchResult.getData();
-            
+
             if (results != null) {
                 // 提取所有 product_id
                 List<Long> productIds = results.stream()
@@ -83,8 +93,39 @@ public class SearchController {
                 }
             }
         }
-        
+
+        // 更新热门搜索词
+        if (keyword != null && !keyword.trim().isEmpty()) {
+            String trimmedKeyword = keyword.trim();
+            LambdaQueryWrapper<AssetHotSearch> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(AssetHotSearch::getKeyword, trimmedKeyword);
+            AssetHotSearch hotSearch = assetHotSearchService.getOne(wrapper);
+
+            if (hotSearch == null) {
+                hotSearch = new AssetHotSearch();
+                hotSearch.setKeyword(trimmedKeyword);
+                hotSearch.setSearchCount(1);
+                hotSearch.setIsActive(true);
+                hotSearch.setUpdatedAt(java.time.LocalDateTime.now());
+                assetHotSearchService.save(hotSearch);
+            } else {
+                hotSearch.setSearchCount(hotSearch.getSearchCount() + 1);
+                hotSearch.setUpdatedAt(java.time.LocalDateTime.now());
+                assetHotSearchService.updateById(hotSearch);
+            }
+        }
+
         return searchResult;
+    }
+
+    @GetMapping("/hot-keywords")
+    public Result<List<AssetHotSearch>> getHotKeywords(@RequestParam(defaultValue = "10") int limit) {
+        LambdaQueryWrapper<AssetHotSearch> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(AssetHotSearch::getIsActive, true);
+        wrapper.orderByDesc(AssetHotSearch::getSearchCount);
+        wrapper.last("LIMIT " + limit);
+        List<AssetHotSearch> hotSearches = assetHotSearchService.list(wrapper);
+        return Result.success(hotSearches);
     }
 
     @GetMapping("/health-check")
@@ -127,6 +168,24 @@ public class SearchController {
     public Result<Void> startRebuildAll() {
         searchService.startRebuildAll();
         return Result.success();
+    }
+
+    @GetMapping("/global-use-top")
+    public Result<List<Map<String, Object>>> getGlobalUseTop() {
+        String json = stringRedisTemplate.opsForValue().get("global_use_top");
+        if (json != null) {
+            return Result.success(com.alibaba.fastjson.JSON.parseObject(json, new com.alibaba.fastjson.TypeReference<List<Map<String, Object>>>() {}));
+        }
+        return Result.success(Collections.emptyList());
+    }
+
+    @GetMapping("/global-star-top")
+    public Result<List<Map<String, Object>>> getGlobalStarTop() {
+        String json = stringRedisTemplate.opsForValue().get("global_star_top");
+        if (json != null) {
+            return Result.success(com.alibaba.fastjson.JSON.parseObject(json, new com.alibaba.fastjson.TypeReference<List<Map<String, Object>>>() {}));
+        }
+        return Result.success(Collections.emptyList());
     }
 
     @GetMapping("/rebuild-all/progress")

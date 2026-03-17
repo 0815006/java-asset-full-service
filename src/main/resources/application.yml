@@ -4,6 +4,11 @@ server:
 spring:
   application:
     name: asset-service
+  redis:
+    host: localhost
+    port: 6379
+    database: 0
+    timeout: 5000ms
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/asset_db?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai

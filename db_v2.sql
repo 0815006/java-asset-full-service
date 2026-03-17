@@ -6,29 +6,6 @@
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
--- Drop existing tables to ensure clean state
-DROP TABLE IF EXISTS `sys_user`;
-DROP TABLE IF EXISTS `sys_role`;
-DROP TABLE IF EXISTS `sys_user_role`;
-DROP TABLE IF EXISTS `sys_menu`;
-DROP TABLE IF EXISTS `sys_role_menu`;
-DROP TABLE IF EXISTS `sys_dept`;
-DROP TABLE IF EXISTS `sys_post`;
-DROP TABLE IF EXISTS `sys_user_post`;
-DROP TABLE IF EXISTS `sys_dict_type`;
-DROP TABLE IF EXISTS `sys_dict_data`;
-DROP TABLE IF EXISTS `sys_config`;
-DROP TABLE IF EXISTS `sys_logininfor`;
-DROP TABLE IF EXISTS `sys_oper_log`;
-DROP TABLE IF EXISTS `sys_notice`;
-DROP TABLE IF EXISTS `busi_product`;
-DROP TABLE IF EXISTS `busi_knowledge_graph`;
-DROP TABLE IF EXISTS `busi_user_favorite`;
-DROP TABLE IF EXISTS `asset_node`;
-DROP TABLE IF EXISTS `asset_file_version`;
-DROP TABLE IF EXISTS `sys_domain`;
-DROP TABLE IF EXISTS `sys_team`;
-
 -- Drop new tables if they exist (re-run safety)
 DROP TABLE IF EXISTS `user`;
 DROP TABLE IF EXISTS `product`;
@@ -127,38 +104,5 @@ CREATE TABLE `edit_lock` (
   UNIQUE KEY `uk_lock_ticket` (`lock_ticket`),
   KEY `idx_expires_at` (`expires_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Markdown并发协同编辑独占锁表';
-
--- ----------------------------
--- Initial Data
--- ----------------------------
-
--- Users
-INSERT INTO `user` (`id`, `username`, `password_hash`, `real_name`, `emp_no`, `role_type`) VALUES
-(1, 'admin', 'e10adc3949ba59abbe56e057f20f883e', '系统管理员', 'ADMIN001', 1),
-(2, 'chendong', 'e10adc3949ba59abbe56e057f20f883e', '陈东', 'NO.9527', 2),
-(3, 'user1', 'e10adc3949ba59abbe56e057f20f883e', '张三', 'USER001', 3);
-
--- Products
-INSERT INTO `product` (`id`, `product_name`, `team_name`, `domain_name`, `owner_id`, `asset_count`) VALUES
-(1, '核心交易平台', '交易技术部', '金融核心域', 2, 10),
-(2, '支付网关系统', '支付技术部', '支付域', 2, 5),
-(3, '用户中心', '基础架构部', '基础域', 2, 8);
-
--- Asset File (Root Folders for Products)
--- Product 1 Roots
-INSERT INTO `asset_file` (`product_id`, `parent_id`, `tree_path`, `node_type`, `file_name`, `created_by`) VALUES
-(1, 0, '/0/1001/', 1, '产品功能全景', 1),
-(1, 0, '/0/1002/', 1, '产品架构', 1),
-(1, 0, '/0/1003/', 1, '产品缺陷', 1),
-(1, 0, '/0/1004/', 1, '业务知识', 1),
-(1, 0, '/0/1005/', 1, '其他支持类', 1);
-
--- Tech Zone Root (Product ID 0)
-INSERT INTO `asset_file` (`product_id`, `parent_id`, `tree_path`, `node_type`, `file_name`, `created_by`) VALUES
-(0, 0, '/0/2001/', 1, '测试技术及工艺专区', 1);
-
--- Mgmt Zone Root (Product ID 0)
-INSERT INTO `asset_file` (`product_id`, `parent_id`, `tree_path`, `node_type`, `file_name`, `created_by`) VALUES
-(0, 0, '/0/3001/', 1, '测试管理专区', 1);
 
 SET FOREIGN_KEY_CHECKS = 1;

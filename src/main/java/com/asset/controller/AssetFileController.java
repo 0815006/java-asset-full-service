@@ -4,6 +4,14 @@ import com.asset.common.Result;
 import com.asset.entity.AssetFile;
 import com.asset.service.AssetFileService;
 import com.asset.service.SearchService;
+import com.asset.entity.UserFileState;
+import com.asset.service.UserFileStateService;
+import com.asset.entity.AssetAccessLog;
+import com.asset.service.AssetAccessLogService;
+import com.asset.entity.UserFileStar;
+import com.asset.service.UserFileStarService;
+import com.asset.entity.AssetCurated;
+import com.asset.service.AssetCuratedService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -27,6 +35,18 @@ public class AssetFileController {
     
     @Autowired
     private SearchService searchService;
+
+    @Autowired
+    private UserFileStateService userFileStateService;
+
+    @Autowired
+    private AssetAccessLogService assetAccessLogService;
+
+    @Autowired
+    private UserFileStarService userFileStarService;
+
+    @Autowired
+    private AssetCuratedService assetCuratedService;
 
     private static final Set<String> syncingKeys = Collections.synchronizedSet(new HashSet<>());
     private static final Map<String, SyncProgress> syncProgressMap = new java.util.concurrent.ConcurrentHashMap<>();
@@ -487,15 +507,20 @@ public class AssetFileController {
                 .orderByAsc(AssetFile::getNodeType) // 文件夹排在前面
                 .orderByAsc(AssetFile::getId));
 
+        // 假设用户ID为2L，实际应从认证上下文获取
+        Long currentUserId = 2L;
+
         list.forEach(node -> {
             // 检查是否有子节点（用于懒加载）
             if (node.getNodeType() == 1) {
                 long count = assetFileService.count(new LambdaQueryWrapper<AssetFile>()
+                        .eq(AssetFile::getProductId, productId)
                         .eq(AssetFile::getParentId, node.getId())
                         .eq(AssetFile::getIsLatest, 1));
                 node.setHasChildren(count > 0);
 
                 long subFolderCount = assetFileService.count(new LambdaQueryWrapper<AssetFile>()
+                        .eq(AssetFile::getProductId, productId)
                         .eq(AssetFile::getParentId, node.getId())
                         .eq(AssetFile::getNodeType, 1) // 仅文件夹
                         .eq(AssetFile::getIsLatest, 1));
@@ -510,6 +535,11 @@ public class AssetFileController {
             permission.put("can_upload", true);
             permission.put("can_delete", true);
             node.setCurrentUserPermission(permission);
+
+            // 设置 isNew 字段
+            node.setIsNew(isNewFile(node, currentUserId));
+            // 设置 isStarred 字段
+            node.setIsStarred(isStarredFile(node, currentUserId));
         });
 
         return Result.success(list);
@@ -754,13 +784,50 @@ public class AssetFileController {
         if (file == null) {
             return Result.error("File not found");
         }
+
+        // 假设用户ID为2L，实际应从认证上下文获取
+        Long currentUserId = 2L; 
+        file.setIsNew(isNewFile(file, currentUserId));
+        file.setIsStarred(isStarredFile(file, currentUserId));
+
         return Result.success(file);
+    }
+
+    private boolean isStarredFile(AssetFile file, Long userId) {
+        LambdaQueryWrapper<UserFileStar> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(UserFileStar::getUserId, userId);
+        wrapper.eq(UserFileStar::getFileId, file.getId());
+        return userFileStarService.count(wrapper) > 0;
+    }
+
+    private boolean isNewFile(AssetFile file, Long userId) {
+        // 14 天是金线：不仅仅是 New 标，全行“最新更新榜”也应只展示 14 天内的内容。
+        // 条件1：必须是 14 天内更新的文件
+        if (file.getUpdatedAt().isBefore(java.time.LocalDateTime.now().minusDays(14))) {
+            return false;
+        }
+
+        // 条件2：用户未读过 OR 文件更新时间晚于最后阅读时间
+        LambdaQueryWrapper<UserFileState> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(UserFileState::getUserId, userId);
+        wrapper.eq(UserFileState::getFileId, file.getId());
+        UserFileState userFileState = userFileStateService.getOne(wrapper);
+
+        if (userFileState == null || file.getUpdatedAt().isAfter(userFileState.getLastReadAt())) {
+            return true;
+        }
+        return false;
     }
 
     @GetMapping("/{id}/detail")
     public Result<AssetFile> detail(@PathVariable Long id) {
         AssetFile file = assetFileService.getById(id);
         if (file == null) return Result.error("文件不存在");
+
+        // 假设用户ID为2L，实际应从认证上下文获取
+        Long currentUserId = 2L;
+        file.setIsNew(isNewFile(file, currentUserId));
+        file.setIsStarred(isStarredFile(file, currentUserId));
         
         return Result.success(file);
     }
@@ -830,16 +897,328 @@ public class AssetFileController {
                 response.getOutputStream().write(buffer, 0, len);
             }
             System.out.println("请求处理成功：ID=" + id + ", FileName=" + file.getFileName());
+
+            // 记录访问日志
+            AssetAccessLog accessLog = new AssetAccessLog();
+            accessLog.setUserId(2L); // 假设用户ID为2L，实际应从认证上下文获取
+            accessLog.setFileId(file.getId());
+            accessLog.setProductId(file.getProductId());
+            accessLog.setCreatedAt(java.time.LocalDateTime.now());
+            assetAccessLogService.save(accessLog);
+
         } catch (IOException e) {
             System.err.println("输出失败：ID=" + id + ", Error=" + e.getMessage());
             e.printStackTrace();
         }
     }
 
+    @GetMapping("/recent-access")
+    public Result<List<Map<String, Object>>> getRecentAccessedFiles(@RequestParam(defaultValue = "2") Long userId,
+                                                                     @RequestParam(defaultValue = "1") int page,
+                                                                     @RequestParam(defaultValue = "10") int size) {
+        // 查询最近访问日志，按访问时间倒序，并进行分页
+        LambdaQueryWrapper<AssetAccessLog> logWrapper = new LambdaQueryWrapper<>();
+        logWrapper.eq(AssetAccessLog::getUserId, userId);
+        logWrapper.orderByDesc(AssetAccessLog::getCreatedAt);
+        logWrapper.last("LIMIT " + (page - 1) * size + "," + size);
+
+        List<AssetAccessLog> accessLogs = assetAccessLogService.list(logWrapper);
+
+        if (accessLogs.isEmpty()) {
+            return Result.success(Collections.emptyList());
+        }
+
+        // 获取文件ID列表
+        List<Long> fileIds = accessLogs.stream()
+                                       .map(AssetAccessLog::getFileId)
+                                       .distinct()
+                                       .collect(Collectors.toList());
+
+        // 根据文件ID查询 AssetFile 详情
+        List<AssetFile> files = assetFileService.listByIds(fileIds);
+        Map<Long, AssetFile> fileMap = files.stream()
+                                            .collect(Collectors.toMap(AssetFile::getId, f -> f));
+
+        // 组装结果，包含访问时间
+        List<Map<String, Object>> result = accessLogs.stream()
+                .map(log -> {
+                    AssetFile file = fileMap.get(log.getFileId());
+                    if (file == null) return null;
+                    
+                    Map<String, Object> map = new HashMap<>();
+                    map.put("id", file.getId());
+                    map.put("fileName", file.getFileName());
+                    map.put("ext", file.getExt());
+                    map.put("nodeType", file.getNodeType());
+                    map.put("productId", file.getProductId());
+                    map.put("treePath", file.getTreePath());
+                    map.put("isNew", isNewFile(file, userId));
+                    map.put("isStarred", isStarredFile(file, userId));
+                    map.put("accessTime", log.getCreatedAt()); // 使用日志中的访问时间
+                    return map;
+                })
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+
+        return Result.success(result);
+    }
+
     @PostMapping("/callback")
     public void callback(@RequestBody Map<String, Object> body) {
         // OnlyOffice 回调，目前仅记录日志
         System.out.println("收到 OnlyOffice 回调: " + body);
+    }
+
+    @PostMapping("/record-read-state")
+    public Result<Void> recordReadState(@RequestBody Map<String, Long> body) {
+        Long fileId = body.get("file_id");
+        Long userId = body.get("user_id"); // 实际应从认证上下文获取
+
+        if (fileId == null || userId == null) {
+            return Result.error("文件ID和用户ID不能为空");
+        }
+
+        LambdaQueryWrapper<UserFileState> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(UserFileState::getUserId, userId);
+        wrapper.eq(UserFileState::getFileId, fileId);
+        UserFileState userFileState = userFileStateService.getOne(wrapper);
+
+        if (userFileState == null) {
+            userFileState = new UserFileState();
+            userFileState.setUserId(userId);
+            userFileState.setFileId(fileId);
+            userFileState.setLastReadAt(java.time.LocalDateTime.now());
+            userFileState.setUpdatedAt(java.time.LocalDateTime.now());
+            userFileStateService.save(userFileState);
+        } else {
+            userFileState.setLastReadAt(java.time.LocalDateTime.now());
+            userFileState.setUpdatedAt(java.time.LocalDateTime.now());
+            userFileStateService.updateById(userFileState);
+        }
+        return Result.success();
+    }
+
+    @GetMapping("/my-stars")
+    public Result<List<AssetFile>> getMyStarredFiles(@RequestParam(defaultValue = "2") Long userId,
+                                                      @RequestParam(defaultValue = "1") int page,
+                                                      @RequestParam(defaultValue = "10") int size) {
+        // 查询用户收藏，按置顶、排序、创建时间倒序
+        LambdaQueryWrapper<UserFileStar> starWrapper = new LambdaQueryWrapper<>();
+        starWrapper.eq(UserFileStar::getUserId, userId);
+        starWrapper.orderByDesc(UserFileStar::getIsPinned);
+        starWrapper.orderByAsc(UserFileStar::getPinOrder);
+        starWrapper.orderByDesc(UserFileStar::getCreatedAt);
+        starWrapper.last("LIMIT " + (page - 1) * size + "," + size);
+
+        List<UserFileStar> starredFiles = userFileStarService.list(starWrapper);
+
+        if (starredFiles.isEmpty()) {
+            return Result.success(Collections.emptyList());
+        }
+
+        // 获取文件ID列表
+        List<Long> fileIds = starredFiles.stream()
+                                        .map(UserFileStar::getFileId)
+                                        .collect(Collectors.toList());
+
+        // 根据文件ID查询 AssetFile 详情
+        List<AssetFile> files = assetFileService.listByIds(fileIds);
+
+        // 重新排序，确保按照收藏日志的顺序返回，并设置 isNew 字段
+        Map<Long, AssetFile> fileMap = files.stream()
+                                            .collect(Collectors.toMap(AssetFile::getId, f -> f));
+
+        List<AssetFile> result = starredFiles.stream()
+                                            .map(star -> {
+                                                AssetFile file = fileMap.get(star.getFileId());
+                                                if (file != null) {
+                                                    file.setIsNew(isNewFile(file, userId));
+                                                    file.setIsStarred(true); // 既然在收藏列表里，肯定已收藏
+                                                }
+                                                return file;
+                                            })
+                                            .filter(Objects::nonNull)
+                                            .collect(Collectors.toList());
+
+        return Result.success(result);
+    }
+
+    @PostMapping("/star/{fileId}")
+    public Result<Void> starFile(@PathVariable Long fileId, @RequestParam(defaultValue = "2") Long userId) {
+        if (fileId == null) {
+            return Result.error("文件ID不能为空");
+        }
+
+        LambdaQueryWrapper<UserFileStar> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(UserFileStar::getUserId, userId);
+        wrapper.eq(UserFileStar::getFileId, fileId);
+        UserFileStar userFileStar = userFileStarService.getOne(wrapper);
+
+        if (userFileStar == null) {
+            // 收藏
+            userFileStar = new UserFileStar();
+            userFileStar.setUserId(userId);
+            userFileStar.setFileId(fileId);
+            userFileStar.setIsPinned(false); // 默认不置顶
+            userFileStar.setPinOrder(0);
+            userFileStar.setCreatedAt(java.time.LocalDateTime.now());
+            userFileStarService.save(userFileStar);
+        } else {
+            // 已经收藏，不做处理，或者可以返回一个提示
+            return Result.error("文件已收藏");
+        }
+        return Result.success();
+    }
+
+    @DeleteMapping("/star/{fileId}")
+    public Result<Void> unstarFile(@PathVariable Long fileId, @RequestParam(defaultValue = "2") Long userId) {
+        if (fileId == null) {
+            return Result.error("文件ID不能为空");
+        }
+
+        LambdaQueryWrapper<UserFileStar> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(UserFileStar::getUserId, userId);
+        wrapper.eq(UserFileStar::getFileId, fileId);
+        userFileStarService.remove(wrapper);
+        return Result.success();
+    }
+
+    @PostMapping("/star/{fileId}/pin")
+    public Result<Void> pinFile(@PathVariable Long fileId,
+                                @RequestParam(defaultValue = "2") Long userId,
+                                @RequestParam(defaultValue = "true") boolean pin) {
+        if (fileId == null) {
+            return Result.error("文件ID不能为空");
+        }
+
+        LambdaQueryWrapper<UserFileStar> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(UserFileStar::getUserId, userId);
+        wrapper.eq(UserFileStar::getFileId, fileId);
+        UserFileStar userFileStar = userFileStarService.getOne(wrapper);
+
+        if (userFileStar == null) {
+            return Result.error("文件未收藏，无法置顶");
+        }
+
+        userFileStar.setIsPinned(pin);
+        // 如果置顶，可以设置一个默认的 pinOrder，或者让前端传入
+        if (pin) {
+            userFileStar.setPinOrder(1); // 默认置顶优先级最高
+        } else {
+            userFileStar.setPinOrder(0);
+        }
+        userFileStarService.updateById(userFileStar);
+        return Result.success();
+    }
+
+    @GetMapping("/curated/{productId}")
+    public Result<List<AssetFile>> getCuratedAssets(@PathVariable Long productId) {
+        LambdaQueryWrapper<AssetCurated> curatedWrapper = new LambdaQueryWrapper<>();
+        curatedWrapper.eq(AssetCurated::getProductId, productId);
+        curatedWrapper.orderByAsc(AssetCurated::getDisplayOrder);
+
+        List<AssetCurated> curatedList = assetCuratedService.list(curatedWrapper);
+
+        if (curatedList.isEmpty()) {
+            return Result.success(Collections.emptyList());
+        }
+
+        List<Long> fileIds = curatedList.stream()
+                                        .map(AssetCurated::getFileId)
+                                        .collect(Collectors.toList());
+
+        List<AssetFile> files = assetFileService.listByIds(fileIds);
+
+        // 重新排序，确保按照 curatedList 的顺序返回
+        Map<Long, AssetFile> fileMap = files.stream()
+                                            .collect(Collectors.toMap(AssetFile::getId, f -> f));
+
+        List<AssetFile> result = curatedList.stream()
+                                            .map(curated -> {
+                                                AssetFile file = fileMap.get(curated.getFileId());
+                                                if (file != null) {
+                                                    file.setIsNew(isNewFile(file, 2L)); // 假设用户ID为2L
+                                                    file.setIsStarred(isStarredFile(file, 2L));
+                                                }
+                                                return file;
+                                            })
+                                            .filter(Objects::nonNull)
+                                            .collect(Collectors.toList());
+
+        return Result.success(result);
+    }
+
+    @GetMapping("/latest-updates")
+    public Result<List<AssetFile>> getLatestUpdates(@RequestParam(defaultValue = "1") int page,
+                                                     @RequestParam(defaultValue = "10") int size) {
+        // 查询最近 14 天内更新的文件，按更新时间倒序
+        LambdaQueryWrapper<AssetFile> wrapper = new LambdaQueryWrapper<>();
+        wrapper.ge(AssetFile::getUpdatedAt, java.time.LocalDateTime.now().minusDays(14));
+        wrapper.eq(AssetFile::getIsLatest, 1); // 只显示最新版本
+        wrapper.eq(AssetFile::getIsDeleted, 0); // 未删除
+        wrapper.orderByDesc(AssetFile::getUpdatedAt);
+        wrapper.last("LIMIT " + (page - 1) * size + "," + size);
+
+        List<AssetFile> files = assetFileService.list(wrapper);
+
+        // 假设用户ID为2L，实际应从认证上下文获取
+        Long currentUserId = 2L;
+        files.forEach(file -> {
+            file.setIsNew(isNewFile(file, currentUserId));
+            file.setIsStarred(isStarredFile(file, currentUserId));
+        });
+
+        return Result.success(files);
+    }
+
+    @GetMapping("/product-use-top/{productId}")
+    public Result<List<AssetFile>> getProductUseTop(@PathVariable Long productId,
+                                                    @RequestParam(defaultValue = "10") int limit) {
+        List<Map<String, Object>> useTopList = assetAccessLogService.getProductUseTop(productId, limit);
+
+        if (useTopList.isEmpty()) {
+            return Result.success(Collections.emptyList());
+        }
+
+        List<Long> fileIds = useTopList.stream()
+                                       .map(map -> Long.valueOf(map.get("file_id").toString()))
+                                       .collect(Collectors.toList());
+
+        List<AssetFile> files = assetFileService.listByIds(fileIds);
+
+        // 重新排序，确保按照 useTopList 的顺序返回
+        Map<Long, AssetFile> fileMap = files.stream()
+                                            .collect(Collectors.toMap(AssetFile::getId, f -> f));
+
+        List<AssetFile> result = useTopList.stream()
+                                           .map(map -> {
+                                               Long fileId = Long.valueOf(map.get("file_id").toString());
+                                               AssetFile file = fileMap.get(fileId);
+                                               if (file != null) {
+                                                   file.setIsNew(isNewFile(file, 2L)); // 假设用户ID为2L
+                                                   file.setIsStarred(isStarredFile(file, 2L));
+                                               }
+                                               return file;
+                                           })
+                                           .filter(Objects::nonNull)
+                                           .collect(Collectors.toList());
+
+        return Result.success(result);
+    }
+
+    @PostMapping("/batch-details")
+    public Result<List<AssetFile>> getBatchDetails(@RequestBody List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Result.success(Collections.emptyList());
+        }
+        List<AssetFile> files = assetFileService.listByIds(ids);
+        // 假设用户ID为2L，实际应从认证上下文获取
+        Long currentUserId = 2L;
+        files.forEach(file -> {
+            file.setIsNew(isNewFile(file, currentUserId));
+            file.setIsStarred(isStarredFile(file, currentUserId));
+        });
+        return Result.success(files);
     }
 
     @PostMapping("/download")
