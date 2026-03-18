@@ -21,8 +21,9 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+
 @RestController
-@RequestMapping("/search")
+@RequestMapping("/api/search")
 @CrossOrigin
 public class SearchController {
 
@@ -40,6 +41,7 @@ public class SearchController {
 
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
+
 
     @GetMapping
     public Result<List<Map<String, Object>>> search(
@@ -97,21 +99,24 @@ public class SearchController {
         // 更新热门搜索词
         if (keyword != null && !keyword.trim().isEmpty()) {
             String trimmedKeyword = keyword.trim();
-            LambdaQueryWrapper<AssetHotSearch> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(AssetHotSearch::getKeyword, trimmedKeyword);
-            AssetHotSearch hotSearch = assetHotSearchService.getOne(wrapper);
+            // 限制热门词长度，超过 15 个字符不计入热门统计
+            if (trimmedKeyword.length() <= 15) {
+                LambdaQueryWrapper<AssetHotSearch> wrapper = new LambdaQueryWrapper<>();
+                wrapper.eq(AssetHotSearch::getKeyword, trimmedKeyword);
+                AssetHotSearch hotSearch = assetHotSearchService.getOne(wrapper);
 
-            if (hotSearch == null) {
-                hotSearch = new AssetHotSearch();
-                hotSearch.setKeyword(trimmedKeyword);
-                hotSearch.setSearchCount(1);
-                hotSearch.setIsActive(true);
-                hotSearch.setUpdatedAt(java.time.LocalDateTime.now());
-                assetHotSearchService.save(hotSearch);
-            } else {
-                hotSearch.setSearchCount(hotSearch.getSearchCount() + 1);
-                hotSearch.setUpdatedAt(java.time.LocalDateTime.now());
-                assetHotSearchService.updateById(hotSearch);
+                if (hotSearch == null) {
+                    hotSearch = new AssetHotSearch();
+                    hotSearch.setKeyword(trimmedKeyword);
+                    hotSearch.setSearchCount(1);
+                    hotSearch.setIsActive(true);
+                    hotSearch.setUpdatedAt(java.time.LocalDateTime.now());
+                    assetHotSearchService.save(hotSearch);
+                } else {
+                    hotSearch.setSearchCount(hotSearch.getSearchCount() + 1);
+                    hotSearch.setUpdatedAt(java.time.LocalDateTime.now());
+                    assetHotSearchService.updateById(hotSearch);
+                }
             }
         }
 

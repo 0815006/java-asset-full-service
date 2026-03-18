@@ -47,3 +47,7 @@ storage:
     public: uploads/public
     internal: uploads/internal
     confidential: uploads/confidential
+
+auth:
+  token-expiration-hours: 6
+  secret-key: asset-management-secret-key-2026

@@ -73,4 +73,7 @@ public class AssetFile {
 
     @TableField(exist = false)
     private Boolean isStarred; // 是否已收藏
+
+    @TableField(exist = false)
+    private Boolean isPinned; // 是否已置顶
 }

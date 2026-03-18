@@ -62,6 +62,6 @@ public class SchedulerConfig {
         // 聚合“资产人气榜”
         List<Map<String, Object>> globalStarTop = userFileStarService.getGlobalStarTop(10);
         stringRedisTemplate.opsForValue().set("global_star_top", com.alibaba.fastjson.JSON.toJSONString(globalStarTop));
-        System.out.println("聚合了资产人气榜数据。");
+        System.out.println("聚合了资产人气榜数据。获取到 " + globalStarTop.size() + " 条数据。存入 Redis 的 JSON: " + com.alibaba.fastjson.JSON.toJSONString(globalStarTop));
     }
 }

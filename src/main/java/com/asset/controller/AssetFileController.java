@@ -24,9 +24,10 @@ import java.util.*;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+import java.util.Comparator;
 
 @RestController
-@RequestMapping("/assets")
+@RequestMapping("/api/assets")
 @CrossOrigin
 public class AssetFileController {
 
@@ -916,11 +917,14 @@ public class AssetFileController {
     public Result<List<Map<String, Object>>> getRecentAccessedFiles(@RequestParam(defaultValue = "2") Long userId,
                                                                      @RequestParam(defaultValue = "1") int page,
                                                                      @RequestParam(defaultValue = "10") int size) {
-        // 查询最近访问日志，按访问时间倒序，并进行分页
+        // 1. 查询最近访问日志，按访问时间倒序
+        // 使用 MyBatis-Plus 的自定义 SQL 或聚合查询来去重
+        // 这里为了简单，先查询较多记录，然后在内存中去重并分页
         LambdaQueryWrapper<AssetAccessLog> logWrapper = new LambdaQueryWrapper<>();
         logWrapper.eq(AssetAccessLog::getUserId, userId);
         logWrapper.orderByDesc(AssetAccessLog::getCreatedAt);
-        logWrapper.last("LIMIT " + (page - 1) * size + "," + size);
+        // 查出较多数据以保证去重后仍有足够数据
+        logWrapper.last("LIMIT 100"); 
 
         List<AssetAccessLog> accessLogs = assetAccessLogService.list(logWrapper);
 
@@ -928,19 +932,32 @@ public class AssetFileController {
             return Result.success(Collections.emptyList());
         }
 
-        // 获取文件ID列表
-        List<Long> fileIds = accessLogs.stream()
+        // 2. 内存去重：按 fileId 分组，取每组最新的记录
+        List<AssetAccessLog> distinctLogs = accessLogs.stream()
+                .collect(Collectors.toMap(
+                        AssetAccessLog::getFileId,
+                        log -> log,
+                        (existing, replacement) -> existing // 保留时间最晚的（因为原始列表已按时间倒序）
+                ))
+                .values()
+                .stream()
+                .sorted(Comparator.comparing(AssetAccessLog::getCreatedAt).reversed())
+                .skip((long) (page - 1) * size)
+                .limit(size)
+                .collect(Collectors.toList());
+
+        // 3. 获取文件ID列表
+        List<Long> fileIds = distinctLogs.stream()
                                        .map(AssetAccessLog::getFileId)
-                                       .distinct()
                                        .collect(Collectors.toList());
 
-        // 根据文件ID查询 AssetFile 详情
+        // 4. 根据文件ID查询 AssetFile 详情
         List<AssetFile> files = assetFileService.listByIds(fileIds);
         Map<Long, AssetFile> fileMap = files.stream()
                                             .collect(Collectors.toMap(AssetFile::getId, f -> f));
 
-        // 组装结果，包含访问时间
-        List<Map<String, Object>> result = accessLogs.stream()
+        // 5. 组装结果
+        List<Map<String, Object>> result = distinctLogs.stream()
                 .map(log -> {
                     AssetFile file = fileMap.get(log.getFileId());
                     if (file == null) return null;
@@ -954,7 +971,12 @@ public class AssetFileController {
                     map.put("treePath", file.getTreePath());
                     map.put("isNew", isNewFile(file, userId));
                     map.put("isStarred", isStarredFile(file, userId));
-                    map.put("accessTime", log.getCreatedAt()); // 使用日志中的访问时间
+                    // 查找该文件的收藏记录以获取置顶状态
+                    UserFileStar star = userFileStarService.getOne(new LambdaQueryWrapper<UserFileStar>()
+                            .eq(UserFileStar::getUserId, userId)
+                            .eq(UserFileStar::getFileId, file.getId()));
+                    map.put("isPinned", star != null && star.getIsPinned());
+                    map.put("accessTime", log.getCreatedAt());
                     return map;
                 })
                 .filter(Objects::nonNull)
@@ -978,22 +1000,37 @@ public class AssetFileController {
             return Result.error("文件ID和用户ID不能为空");
         }
 
-        LambdaQueryWrapper<UserFileState> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(UserFileState::getUserId, userId);
-        wrapper.eq(UserFileState::getFileId, fileId);
-        UserFileState userFileState = userFileStateService.getOne(wrapper);
+        try {
+            LambdaQueryWrapper<UserFileState> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(UserFileState::getUserId, userId);
+            wrapper.eq(UserFileState::getFileId, fileId);
+            UserFileState userFileState = userFileStateService.getOne(wrapper);
 
-        if (userFileState == null) {
-            userFileState = new UserFileState();
-            userFileState.setUserId(userId);
-            userFileState.setFileId(fileId);
-            userFileState.setLastReadAt(java.time.LocalDateTime.now());
-            userFileState.setUpdatedAt(java.time.LocalDateTime.now());
-            userFileStateService.save(userFileState);
-        } else {
-            userFileState.setLastReadAt(java.time.LocalDateTime.now());
-            userFileState.setUpdatedAt(java.time.LocalDateTime.now());
-            userFileStateService.updateById(userFileState);
+            if (userFileState == null) {
+                userFileState = new UserFileState();
+                userFileState.setUserId(userId);
+                userFileState.setFileId(fileId);
+                userFileState.setLastReadAt(java.time.LocalDateTime.now());
+                userFileState.setUpdatedAt(java.time.LocalDateTime.now());
+                try {
+                    userFileStateService.save(userFileState);
+                } catch (org.springframework.dao.DuplicateKeyException e) {
+                    // 如果并发导致插入失败，说明记录已存在，执行更新逻辑
+                    UserFileState existing = userFileStateService.getOne(wrapper);
+                    if (existing != null) {
+                        existing.setLastReadAt(java.time.LocalDateTime.now());
+                        existing.setUpdatedAt(java.time.LocalDateTime.now());
+                        userFileStateService.updateById(existing);
+                    }
+                }
+            } else {
+                userFileState.setLastReadAt(java.time.LocalDateTime.now());
+                userFileState.setUpdatedAt(java.time.LocalDateTime.now());
+                userFileStateService.updateById(userFileState);
+            }
+        } catch (Exception e) {
+            // 记录日志但不中断流程
+            System.err.println("记录阅读状态失败: " + e.getMessage());
         }
         return Result.success();
     }
@@ -1034,6 +1071,7 @@ public class AssetFileController {
                                                 if (file != null) {
                                                     file.setIsNew(isNewFile(file, userId));
                                                     file.setIsStarred(true); // 既然在收藏列表里，肯定已收藏
+                                                    file.setIsPinned(star.getIsPinned()); // 显式设置 isPinned 字段
                                                 }
                                                 return file;
                                             })
@@ -1104,6 +1142,7 @@ public class AssetFileController {
         // 如果置顶，可以设置一个默认的 pinOrder，或者让前端传入
         if (pin) {
             userFileStar.setPinOrder(1); // 默认置顶优先级最高
+            userFileStar.setCreatedAt(java.time.LocalDateTime.now()); // 更新时间以触发重新排序
         } else {
             userFileStar.setPinOrder(0);
         }
