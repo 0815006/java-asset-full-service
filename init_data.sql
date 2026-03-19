@@ -2,21 +2,21 @@ SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- Clear existing data
-TRUNCATE TABLE `user`;
-TRUNCATE TABLE `product`;
+TRUNCATE TABLE `asset_user`;
+TRUNCATE TABLE `asset_product`;
 TRUNCATE TABLE `asset_file`;
 TRUNCATE TABLE `user_favorite_product`;
 TRUNCATE TABLE `edit_lock`;
 
 -- Users
-INSERT INTO `user` (`id`, `username`, `password_hash`, `real_name`, `emp_no`, `role_type`) VALUES
-(1, 'admin', 'e10adc3949ba59abbe56e057f20f883e', '系统管理员', 'ADMIN001', 1),
-(2, 'chendong', 'e10adc3949ba59abbe56e057f20f883e', '陈东', 'NO.9527', 2),
-(3, 'linlin', 'e10adc3949ba59abbe56e057f20f883e', '林琳', 'NO.9528', 2),
-(4, 'wangqiang', 'e10adc3949ba59abbe56e057f20f883e', '王强', 'NO.9529', 3);
+INSERT INTO `asset_user` (`id`, `username`, `password_hash`, `real_name`, `emp_no`, `role_type`) VALUES
+(1, 'admin', 'c47592d032708dc847337bdcd70d9e6d', '系统管理员', 'ADMIN001', 1),
+(2, 'chendong', 'c47592d032708dc847337bdcd70d9e6d', '陈东', 'NO.9527', 2),
+(3, 'linlin', 'c47592d032708dc847337bdcd70d9e6d', '林琳', 'NO.9528', 2),
+(4, 'wangqiang', 'c47592d032708dc847337bdcd70d9e6d', '王强', 'NO.9529', 3);
 
 -- Products
-INSERT INTO `product` (`id`, `product_name`, `team_name`, `domain_name`, `owner_id`, `asset_count`) VALUES
+INSERT INTO `asset_product` (`id`, `product_name`, `team_name`, `domain_name`, `owner_id`, `asset_count`) VALUES
 (1, '核心银行系统', '测试二团队', '供应链域', 2, 31),
 (2, '个人网银系统', '测试三团队', '数据智能域', 2, 6),
 (3, '企业网银系统', '测试四团队', '基础架构域', 2, 45),

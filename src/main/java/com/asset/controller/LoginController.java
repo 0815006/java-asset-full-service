@@ -10,7 +10,9 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
 import java.util.Map;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @RestController
 @RequestMapping("/api")
 @CrossOrigin
@@ -27,19 +29,32 @@ public class LoginController {
         String username = loginData.get("username");
         String password = loginData.get("password");
 
-        User user = userService.getOne(new LambdaQueryWrapper<User>().eq(User::getUsername, username));
+        log.info("Attempting to log in user: {}", username);
+        User user;
+        try {
+            log.info("Querying database for user: {}", username);
+            user = userService.getOne(new LambdaQueryWrapper<User>().eq(User::getUsername, username));
+            log.info("Database query finished for user: {}", username);
+        } catch (Exception e) {
+            log.error("Database query failed for user: {}", username, e);
+            return Result.error("数据库查询异常，请检查后台日志");
+        }
+
         if (user == null) {
+            log.warn("Login failed for user '{}': user not found", username);
             return Result.error("用户不存在");
         }
         
         // 角色逻辑：4=外购人员，需要校验密码
         if (user.getRoleType() != null && user.getRoleType() == 4) {
             if (password == null || !password.equals(user.getPasswordHash())) {
+                log.warn("Login failed for user '{}': incorrect password", username);
                 return Result.error("密码错误");
             }
         }
         // 其他角色（1, 2, 3）直接登录，不校验密码
 
+        log.info("Login successful for user '{}'", username);
         Map<String, Object> data = new HashMap<>();
         data.put("token", tokenUtils.generateToken(user.getId()));
         data.put("user", user);

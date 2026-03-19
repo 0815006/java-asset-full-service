@@ -12,6 +12,9 @@ import com.asset.entity.UserFileStar;
 import com.asset.service.UserFileStarService;
 import com.asset.entity.AssetCurated;
 import com.asset.service.AssetCuratedService;
+import com.asset.service.IAssetCuratedService;
+import com.asset.service.IProductUseRankingService;
+import com.asset.dto.ProductUseRankingDTO;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -47,7 +50,10 @@ public class AssetFileController {
     private UserFileStarService userFileStarService;
 
     @Autowired
-    private AssetCuratedService assetCuratedService;
+    private IAssetCuratedService assetCuratedService;
+
+    @Autowired
+    private IProductUseRankingService productUseRankingService;
 
     private static final Set<String> syncingKeys = Collections.synchronizedSet(new HashSet<>());
     private static final Map<String, SyncProgress> syncProgressMap = new java.util.concurrent.ConcurrentHashMap<>();
@@ -500,7 +506,7 @@ public class AssetFileController {
     }
 
     @GetMapping("/tree")
-    public Result<List<AssetFile>> getTree(@RequestParam("product_id") Long productId, @RequestParam("parent_id") Long parentId) {
+    public Result<List<AssetFile>> getTree(@RequestParam("product_id") Long productId, @RequestParam("parent_id") Long parentId, @RequestParam(value = "userId", required = false) Long userId) {
         List<AssetFile> list = assetFileService.list(new LambdaQueryWrapper<AssetFile>()
                 .eq(AssetFile::getProductId, productId)
                 .eq(AssetFile::getParentId, parentId)
@@ -508,8 +514,8 @@ public class AssetFileController {
                 .orderByAsc(AssetFile::getNodeType) // 文件夹排在前面
                 .orderByAsc(AssetFile::getId));
 
-        // 假设用户ID为2L，实际应从认证上下文获取
-        Long currentUserId = 2L;
+        // 如果前端传了 userId，则使用前端传的，否则使用默认的 2L
+        Long currentUserId = userId != null ? userId : 2L;
 
         list.forEach(node -> {
             // 检查是否有子节点（用于懒加载）
@@ -780,16 +786,18 @@ public class AssetFileController {
     }
 
     @GetMapping("/{id}/details")
-    public Result<AssetFile> getAssetDetails(@PathVariable Long id) {
+    public Result<AssetFile> getAssetDetails(@PathVariable Long id, @RequestParam(value = "userId", required = false) Long userId) {
         AssetFile file = assetFileService.getById(id);
         if (file == null) {
             return Result.error("File not found");
         }
 
-        // 假设用户ID为2L，实际应从认证上下文获取
-        Long currentUserId = 2L; 
+        // 如果前端传了 userId，则使用前端传的，否则使用默认的 2L
+        Long currentUserId = userId != null ? userId : 2L; 
         file.setIsNew(isNewFile(file, currentUserId));
         file.setIsStarred(isStarredFile(file, currentUserId));
+        // 为了兼容前端逻辑，同时设置 currentUserStarred
+        file.setCurrentUserStarred(isStarredFile(file, currentUserId));
 
         return Result.success(file);
     }
@@ -821,14 +829,15 @@ public class AssetFileController {
     }
 
     @GetMapping("/{id}/detail")
-    public Result<AssetFile> detail(@PathVariable Long id) {
+    public Result<AssetFile> detail(@PathVariable Long id, @RequestParam(value = "userId", required = false) Long userId) {
         AssetFile file = assetFileService.getById(id);
         if (file == null) return Result.error("文件不存在");
 
-        // 假设用户ID为2L，实际应从认证上下文获取
-        Long currentUserId = 2L;
+        // 如果前端传了 userId，则使用前端传的，否则使用默认的 2L
+        Long currentUserId = userId != null ? userId : 2L;
         file.setIsNew(isNewFile(file, currentUserId));
         file.setIsStarred(isStarredFile(file, currentUserId));
+        file.setCurrentUserStarred(isStarredFile(file, currentUserId));
         
         return Result.success(file);
     }
@@ -836,6 +845,7 @@ public class AssetFileController {
     @GetMapping("/{id}/view")
     public void viewFile(@PathVariable Long id, 
                          @RequestParam(value = "download", required = false, defaultValue = "false") boolean download,
+                         @RequestParam(value = "userId", required = false) Long userId,
                          HttpServletResponse response) {
         System.out.println("收到预览/下载请求，ID=" + id + ", download=" + download);
         AssetFile file = assetFileService.getById(id);
@@ -901,7 +911,9 @@ public class AssetFileController {
 
             // 记录访问日志
             AssetAccessLog accessLog = new AssetAccessLog();
-            accessLog.setUserId(2L); // 假设用户ID为2L，实际应从认证上下文获取
+            // 如果前端传了 userId，则使用前端传的，否则使用默认的 2L
+            Long currentUserId = userId != null ? userId : 2L;
+            accessLog.setUserId(currentUserId);
             accessLog.setFileId(file.getId());
             accessLog.setProductId(file.getProductId());
             accessLog.setCreatedAt(java.time.LocalDateTime.now());
@@ -914,17 +926,17 @@ public class AssetFileController {
     }
 
     @GetMapping("/recent-access")
-    public Result<List<Map<String, Object>>> getRecentAccessedFiles(@RequestParam(defaultValue = "2") Long userId,
-                                                                     @RequestParam(defaultValue = "1") int page,
-                                                                     @RequestParam(defaultValue = "10") int size) {
+    public Result<List<Map<String, Object>>> getRecentAccessedFiles(@RequestParam(value = "userId", required = false) Long userId) {
         // 1. 查询最近访问日志，按访问时间倒序
         // 使用 MyBatis-Plus 的自定义 SQL 或聚合查询来去重
         // 这里为了简单，先查询较多记录，然后在内存中去重并分页
         LambdaQueryWrapper<AssetAccessLog> logWrapper = new LambdaQueryWrapper<>();
-        logWrapper.eq(AssetAccessLog::getUserId, userId);
+        // 如果前端传了 userId，则使用前端传的，否则使用默认的 2L
+        Long currentUserId = userId != null ? userId : 2L;
+        logWrapper.eq(AssetAccessLog::getUserId, currentUserId);
         logWrapper.orderByDesc(AssetAccessLog::getCreatedAt);
         // 查出较多数据以保证去重后仍有足够数据
-        logWrapper.last("LIMIT 100"); 
+        logWrapper.last("LIMIT 200"); 
 
         List<AssetAccessLog> accessLogs = assetAccessLogService.list(logWrapper);
 
@@ -932,7 +944,7 @@ public class AssetFileController {
             return Result.success(Collections.emptyList());
         }
 
-        // 2. 内存去重：按 fileId 分组，取每组最新的记录
+        // 2. 内存去重：按 fileId 分组，取每组最新的记录，并限制为 50 条
         List<AssetAccessLog> distinctLogs = accessLogs.stream()
                 .collect(Collectors.toMap(
                         AssetAccessLog::getFileId,
@@ -942,8 +954,7 @@ public class AssetFileController {
                 .values()
                 .stream()
                 .sorted(Comparator.comparing(AssetAccessLog::getCreatedAt).reversed())
-                .skip((long) (page - 1) * size)
-                .limit(size)
+                .limit(50)
                 .collect(Collectors.toList());
 
         // 3. 获取文件ID列表
@@ -969,11 +980,11 @@ public class AssetFileController {
                     map.put("nodeType", file.getNodeType());
                     map.put("productId", file.getProductId());
                     map.put("treePath", file.getTreePath());
-                    map.put("isNew", isNewFile(file, userId));
-                    map.put("isStarred", isStarredFile(file, userId));
+                    map.put("isNew", isNewFile(file, currentUserId));
+                    map.put("isStarred", isStarredFile(file, currentUserId));
                     // 查找该文件的收藏记录以获取置顶状态
                     UserFileStar star = userFileStarService.getOne(new LambdaQueryWrapper<UserFileStar>()
-                            .eq(UserFileStar::getUserId, userId)
+                            .eq(UserFileStar::getUserId, currentUserId)
                             .eq(UserFileStar::getFileId, file.getId()));
                     map.put("isPinned", star != null && star.getIsPinned());
                     map.put("accessTime", log.getCreatedAt());
@@ -1151,7 +1162,7 @@ public class AssetFileController {
     }
 
     @GetMapping("/curated/{productId}")
-    public Result<List<AssetFile>> getCuratedAssets(@PathVariable Long productId) {
+    public Result<List<AssetFile>> getCuratedAssets(@PathVariable Long productId, @RequestParam(value = "userId", required = false) Long userId) {
         LambdaQueryWrapper<AssetCurated> curatedWrapper = new LambdaQueryWrapper<>();
         curatedWrapper.eq(AssetCurated::getProductId, productId);
         curatedWrapper.orderByAsc(AssetCurated::getDisplayOrder);
@@ -1172,12 +1183,16 @@ public class AssetFileController {
         Map<Long, AssetFile> fileMap = files.stream()
                                             .collect(Collectors.toMap(AssetFile::getId, f -> f));
 
+        // 如果前端传了 userId，则使用前端传的，否则使用默认的 2L
+        Long currentUserId = userId != null ? userId : 2L;
+
         List<AssetFile> result = curatedList.stream()
                                             .map(curated -> {
                                                 AssetFile file = fileMap.get(curated.getFileId());
                                                 if (file != null) {
-                                                    file.setIsNew(isNewFile(file, 2L)); // 假设用户ID为2L
-                                                    file.setIsStarred(isStarredFile(file, 2L));
+                                                    file.setIsNew(isNewFile(file, currentUserId));
+                                                    file.setIsStarred(isStarredFile(file, currentUserId));
+                                                    file.setCurrentUserStarred(isStarredFile(file, currentUserId));
                                                 }
                                                 return file;
                                             })
@@ -1189,10 +1204,12 @@ public class AssetFileController {
 
     @GetMapping("/latest-updates")
     public Result<List<AssetFile>> getLatestUpdates(@RequestParam(defaultValue = "1") int page,
-                                                     @RequestParam(defaultValue = "10") int size) {
+                                                     @RequestParam(defaultValue = "10") int size,
+                                                     @RequestParam(value = "userId", required = false) Long userId) {
         // 查询最近 14 天内更新的文件，按更新时间倒序
         LambdaQueryWrapper<AssetFile> wrapper = new LambdaQueryWrapper<>();
         wrapper.ge(AssetFile::getUpdatedAt, java.time.LocalDateTime.now().minusDays(14));
+        wrapper.eq(AssetFile::getNodeType, 2); // 只查询文件
         wrapper.eq(AssetFile::getIsLatest, 1); // 只显示最新版本
         wrapper.eq(AssetFile::getIsDeleted, 0); // 未删除
         wrapper.orderByDesc(AssetFile::getUpdatedAt);
@@ -1200,11 +1217,12 @@ public class AssetFileController {
 
         List<AssetFile> files = assetFileService.list(wrapper);
 
-        // 假设用户ID为2L，实际应从认证上下文获取
-        Long currentUserId = 2L;
+        // 如果前端传了 userId，则使用前端传的，否则使用默认的 2L
+        Long currentUserId = userId != null ? userId : 2L;
         files.forEach(file -> {
             file.setIsNew(isNewFile(file, currentUserId));
             file.setIsStarred(isStarredFile(file, currentUserId));
+            file.setCurrentUserStarred(isStarredFile(file, currentUserId));
         });
 
         return Result.success(files);
@@ -1212,7 +1230,8 @@ public class AssetFileController {
 
     @GetMapping("/product-use-top/{productId}")
     public Result<List<AssetFile>> getProductUseTop(@PathVariable Long productId,
-                                                    @RequestParam(defaultValue = "10") int limit) {
+                                                    @RequestParam(defaultValue = "10") int limit,
+                                                    @RequestParam(value = "userId", required = false) Long userId) {
         List<Map<String, Object>> useTopList = assetAccessLogService.getProductUseTop(productId, limit);
 
         if (useTopList.isEmpty()) {
@@ -1229,13 +1248,17 @@ public class AssetFileController {
         Map<Long, AssetFile> fileMap = files.stream()
                                             .collect(Collectors.toMap(AssetFile::getId, f -> f));
 
+        // 如果前端传了 userId，则使用前端传的，否则使用默认的 2L
+        Long currentUserId = userId != null ? userId : 2L;
+
         List<AssetFile> result = useTopList.stream()
                                            .map(map -> {
                                                Long fileId = Long.valueOf(map.get("file_id").toString());
                                                AssetFile file = fileMap.get(fileId);
                                                if (file != null) {
-                                                   file.setIsNew(isNewFile(file, 2L)); // 假设用户ID为2L
-                                                   file.setIsStarred(isStarredFile(file, 2L));
+                                                   file.setIsNew(isNewFile(file, currentUserId));
+                                                   file.setIsStarred(isStarredFile(file, currentUserId));
+                                                   file.setCurrentUserStarred(isStarredFile(file, currentUserId));
                                                }
                                                return file;
                                            })
@@ -1246,16 +1269,24 @@ public class AssetFileController {
     }
 
     @PostMapping("/batch-details")
-    public Result<List<AssetFile>> getBatchDetails(@RequestBody List<Long> ids) {
+    public Result<List<AssetFile>> getBatchDetails(@RequestBody Map<String, Object> body) {
+        List<Long> ids = (List<Long>) body.get("ids");
         if (ids == null || ids.isEmpty()) {
             return Result.success(Collections.emptyList());
         }
         List<AssetFile> files = assetFileService.listByIds(ids);
-        // 假设用户ID为2L，实际应从认证上下文获取
-        Long currentUserId = 2L;
+        
+        Long userId = null;
+        if (body.get("userId") != null) {
+            userId = Long.valueOf(body.get("userId").toString());
+        }
+        // 如果前端传了 userId，则使用前端传的，否则使用默认的 2L
+        Long currentUserId = userId != null ? userId : 2L;
+        
         files.forEach(file -> {
             file.setIsNew(isNewFile(file, currentUserId));
             file.setIsStarred(isStarredFile(file, currentUserId));
+            file.setCurrentUserStarred(isStarredFile(file, currentUserId));
         });
         return Result.success(files);
     }
@@ -1390,5 +1421,17 @@ public class AssetFileController {
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    @GetMapping("/product/{productId}/curated-assets")
+    public Result<List<AssetCurated>> getProductCuratedAssets(@PathVariable Long productId) {
+        List<AssetCurated> curatedAssets = assetCuratedService.getCuratedAssetsByProductId(productId);
+        return Result.success(curatedAssets);
+    }
+
+    @GetMapping("/product/{productId}/use-ranking")
+    public Result<List<ProductUseRankingDTO>> getProductUseRanking(@PathVariable Long productId) {
+        List<ProductUseRankingDTO> ranking = productUseRankingService.getProductUseRanking(productId);
+        return Result.success(ranking);
     }
 }

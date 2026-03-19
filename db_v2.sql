@@ -7,16 +7,16 @@ SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- Drop new tables if they exist (re-run safety)
-DROP TABLE IF EXISTS `user`;
-DROP TABLE IF EXISTS `product`;
+DROP TABLE IF EXISTS `asset_user`;
+DROP TABLE IF EXISTS `asset_product`;
 DROP TABLE IF EXISTS `user_favorite_product`;
 DROP TABLE IF EXISTS `asset_file`;
 DROP TABLE IF EXISTS `edit_lock`;
 
 -- ----------------------------
--- 1. Table structure for user (极简用户表)
+-- 1. Table structure for asset_user (极简用户表)
 -- ----------------------------
-CREATE TABLE `user` (
+CREATE TABLE `asset_user` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键自增',
   `username` VARCHAR(50) NOT NULL COMMENT '登录账号',
   `password_hash` VARCHAR(255) NOT NULL COMMENT '密码Hash',
@@ -32,14 +32,14 @@ CREATE TABLE `user` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='极简用户身份表';
 
 -- ----------------------------
--- 2. Table structure for product (产品域物理隔离表)
+-- 2. Table structure for asset_product (产品域物理隔离表)
 -- ----------------------------
-CREATE TABLE `product` (
+CREATE TABLE `asset_product` (
   `id` BIGINT NOT NULL AUTO_INCREMENT,
   `product_name` VARCHAR(100) NOT NULL COMMENT '产品名称 (如: 核心业务系统)',
   `team_name` VARCHAR(100) NOT NULL COMMENT '归属团队',
   `domain_name` VARCHAR(100) NOT NULL COMMENT '归属领域 (支撑产品卡片按领域分组)',
-  `owner_id` BIGINT NOT NULL COMMENT '负责人ID (关联 user.id)',
+  `owner_id` BIGINT NOT NULL COMMENT '负责人ID (关联 asset_user.id)',
   `asset_count` INT NOT NULL DEFAULT 0 COMMENT '资产统计冗余字段 (供前端极速展示)',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

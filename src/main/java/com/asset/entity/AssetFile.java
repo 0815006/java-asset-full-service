@@ -75,5 +75,8 @@ public class AssetFile {
     private Boolean isStarred; // 是否已收藏
 
     @TableField(exist = false)
+    private Boolean currentUserStarred; // 当前用户是否已收藏
+
+    @TableField(exist = false)
     private Boolean isPinned; // 是否已置顶
 }

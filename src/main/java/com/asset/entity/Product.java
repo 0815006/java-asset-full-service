@@ -6,12 +6,14 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("product")
+@TableName("asset_product")
 public class Product {
     @TableId(type = IdType.AUTO)
     private Long id;
 
     private String productName;
+
+    private String productCode;
 
     private String teamName;
 
