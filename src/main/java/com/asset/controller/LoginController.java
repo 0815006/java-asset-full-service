@@ -24,6 +24,9 @@ public class LoginController {
     @Autowired
     private TokenUtils tokenUtils;
 
+    @org.springframework.beans.factory.annotation.Value("${auth.verify-internal-password:false}")
+    private boolean verifyInternalPassword;
+
     @PostMapping("/login")
     public Result<Map<String, Object>> login(@RequestBody Map<String, String> loginData) {
         String username = loginData.get("username");
@@ -45,14 +48,24 @@ public class LoginController {
             return Result.error("用户不存在");
         }
         
-        // 角色逻辑：4=外购人员，需要校验密码
-        if (user.getRoleType() != null && user.getRoleType() == 4) {
+        // 角色逻辑：
+        // 1. role_type = 4 (外购人员) 永远校验密码
+        // 2. role_type = 1, 2, 3 (内部人员) 根据配置 verifyInternalPassword 决定是否校验
+        boolean needVerify = false;
+        if (user.getRoleType() != null) {
+            if (user.getRoleType() == 4) {
+                needVerify = true;
+            } else if (verifyInternalPassword) {
+                needVerify = true;
+            }
+        }
+
+        if (needVerify) {
             if (password == null || !password.equals(user.getPasswordHash())) {
                 log.warn("Login failed for user '{}': incorrect password", username);
                 return Result.error("密码错误");
             }
         }
-        // 其他角色（1, 2, 3）直接登录，不校验密码
 
         log.info("Login successful for user '{}'", username);
         Map<String, Object> data = new HashMap<>();

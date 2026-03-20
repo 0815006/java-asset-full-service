@@ -1,53 +1,62 @@
-server:
-  port: 8081
+# ===================================================================
+# 公共配置文件 (Common Configuration)
+# 包含所有环境通用的基础设置。
+# ===================================================================
 
 spring:
+  profiles:
+    # 默认激活的环境配置 (dev/prod)
+    active: dev 
+  
   application:
+    # 应用名称，用于日志和监控
     name: asset-service
-  redis:
-    host: localhost
-    port: 6379
-    database: 0
-    timeout: 5000ms
-  datasource:
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/asset_db?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai
-    username: root
-    password: root # 请根据实际情况修改密码
+
   jackson:
+    # 全局 JSON 时间格式化
     date-format: yyyy-MM-dd HH:mm:ss
+    # 设置时区为东八区
     time-zone: Asia/Shanghai
-  data:
-    solr:
-      host: http://localhost:8983/solr
 
   servlet:
     multipart:
+      # 单个文件上传最大限制
       max-file-size: 100MB
+      # 单次请求总上传大小限制
       max-request-size: 100MB
 
+# MyBatis Plus 持久层框架配置
 mybatis-plus:
+  # Mapper XML 文件存放路径
   mapper-locations: classpath:mapper/*.xml
+  # 实体类所在包路径
   type-aliases-package: com.asset.entity
   configuration:
+    # 开启数据库下划线字段到 Java 驼峰属性的自动映射
     map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl # 开发环境开启SQL日志
+    # 控制台打印 SQL 日志 (开发环境建议开启)
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
   global-config:
     db-config:
+      # 主键生成策略：数据库自增
       id-type: auto
+      # 逻辑删除字段名
       logic-delete-field: deleted
+      # 逻辑删除标记值 (1 表示已删除)
       logic-delete-value: 1
+      # 逻辑未删除标记值 (0 表示正常)
       logic-not-delete-value: 0
 
-file:
-  upload-dir: D:/data/asset_files
-
+# 业务存储分类路径 (相对于 upload-dir)
 storage:
   location:
     public: uploads/public
     internal: uploads/internal
     confidential: uploads/confidential
 
+# 认证与安全配置
 auth:
+  # 登录 Token 有效期 (小时)
   token-expiration-hours: 6
+  # JWT 签名密钥 (生产环境务必修改)
   secret-key: asset-management-secret-key-2026

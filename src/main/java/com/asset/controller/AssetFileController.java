@@ -16,6 +16,7 @@ import com.asset.service.IAssetCuratedService;
 import com.asset.service.IProductUseRankingService;
 import com.asset.dto.ProductUseRankingDTO;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -23,12 +24,18 @@ import org.springframework.web.multipart.MultipartFile;
 import javax.servlet.http.HttpServletResponse;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import java.util.Comparator;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/assets")
 @CrossOrigin
@@ -36,6 +43,9 @@ public class AssetFileController {
 
     @Autowired
     private AssetFileService assetFileService;
+
+    @Autowired
+    private com.asset.mapper.AssetFileMapper assetFileMapper;
     
     @Autowired
     private SearchService searchService;
@@ -57,6 +67,7 @@ public class AssetFileController {
 
     private static final Set<String> syncingKeys = Collections.synchronizedSet(new HashSet<>());
     private static final Map<String, SyncProgress> syncProgressMap = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<String, BatchProgress> batchProgressMap = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static class SyncProgress {
         public int totalFiles = 0;
@@ -66,8 +77,18 @@ public class AssetFileController {
         public String errorMsg = null;
     }
 
+    public static class BatchProgress {
+        public int total = 0;
+        public int current = 0;
+        public String status = "running"; // running, finished, error
+        public String message = "";
+    }
+
     @org.springframework.beans.factory.annotation.Value("${file.upload-dir}")
     private String uploadDir;
+
+    @org.springframework.beans.factory.annotation.Value("${file.recycle-bin-dir}")
+    private String recycleBinDir;
 
     private String getPhysicalPath(AssetFile file) {
         StringBuilder path = new StringBuilder(uploadDir);
@@ -627,9 +648,209 @@ public class AssetFileController {
     
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
+        AssetFile file = assetFileService.getById(id);
+        if (file == null) return Result.error("文件不存在");
+
+        // 1. 物理文件移动到回收站
+        if (file.getNodeType() == 2 && file.getLocalPath() != null && !file.getLocalPath().isEmpty()) {
+            try {
+                java.io.File sourceFile = new java.io.File(file.getLocalPath());
+                if (sourceFile.exists()) {
+                    java.io.File recycleDir = new java.io.File(recycleBinDir);
+                    if (!recycleDir.exists()) recycleDir.mkdirs();
+
+                    // 新文件名：ID_原文件名
+                    String recycleFileName = file.getId() + "_" + file.getFileName();
+                    java.io.File destFile = new java.io.File(recycleDir, recycleFileName);
+                    
+                    Files.move(sourceFile.toPath(), destFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                    
+                    // 更新数据库中的物理路径为回收站路径
+                    file.setLocalPath(destFile.getAbsolutePath());
+                    assetFileService.updateById(file);
+                }
+            } catch (IOException e) {
+                log.error("Failed to move file to recycle bin: {}", e.getMessage());
+                return Result.error("文件移动至回收站失败: " + e.getMessage());
+            }
+        }
+
+        // 2. 数据库软删除 (MyBatis Plus 自动处理 is_deleted)
         assetFileService.removeById(id);
+        
+        // 3. 同步删除 Solr 索引
         searchService.delete(id);
+        
+        // 4. 清理核心资产标记
+        assetCuratedService.remove(new LambdaQueryWrapper<AssetCurated>().eq(AssetCurated::getFileId, id));
+        
+        // 5. 清理用户收藏记录
+        userFileStarService.remove(new LambdaQueryWrapper<UserFileStar>().eq(UserFileStar::getFileId, id));
+        
         return Result.success();
+    }
+
+    @GetMapping("/recycle-bin")
+    public Result<List<Map<String, Object>>> getRecycleBin() {
+        // 使用自定义 Mapper 方法绕过逻辑删除过滤
+        List<AssetFile> list = assetFileMapper.selectDeletedFiles();
+        
+        List<Map<String, Object>> result = list.stream().map(file -> {
+            Map<String, Object> map = new HashMap<>();
+            map.put("id", file.getId());
+            map.put("fileName", file.getFileName());
+            map.put("updatedAt", file.getUpdatedAt());
+            map.put("nodeType", file.getNodeType());
+            
+            // 计算原物理路径（用于展示）
+            String path = getPhysicalPath(file);
+            map.put("originalPath", path.replace(uploadDir, "")); 
+            
+            return map;
+        }).collect(Collectors.toList());
+        
+        return Result.success(result);
+    }
+
+    @PostMapping("/{id}/restore")
+    public Result<Void> restore(@PathVariable Long id) {
+        // 使用自定义 Mapper 方法绕过逻辑删除过滤
+        AssetFile file = assetFileMapper.selectByIdWithDeleted(id);
+        if (file == null) return Result.error("文件不存在");
+        if (file.getIsDeleted() == 0) return Result.error("文件未被删除，无需恢复");
+
+        // 1. 校验原目录是否存在
+        String originalDirStr = getPhysicalPath(file);
+        java.io.File originalDir = new java.io.File(originalDirStr);
+        if (!originalDir.exists()) {
+            return Result.error("原存储目录已不存在，无法恢复，请联系运维人员。目录：" + originalDirStr);
+        }
+
+        // 2. 校验同名冲突
+        java.io.File targetFile = new java.io.File(originalDir, file.getFileName());
+        if (targetFile.exists()) {
+            return Result.error("恢复失败：原目录下已存在同名文件 \"" + file.getFileName() + "\"，请先处理冲突。");
+        }
+
+        // 3. 物理文件移回
+        if (file.getLocalPath() != null && !file.getLocalPath().isEmpty()) {
+            try {
+                java.io.File sourceFile = new java.io.File(file.getLocalPath());
+                if (sourceFile.exists()) {
+                    Files.move(sourceFile.toPath(), targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                    file.setLocalPath(targetFile.getAbsolutePath());
+                } else {
+                    return Result.error("回收站中未找到物理文件，无法恢复。");
+                }
+            } catch (IOException e) {
+                return Result.error("文件移回失败: " + e.getMessage());
+            }
+        }
+
+        // 4. 数据库状态恢复
+        assetFileMapper.restoreById(id, targetFile.getAbsolutePath());
+        
+        // 5. 重新同步 Solr
+        file.setIsDeleted(0);
+        file.setLocalPath(targetFile.getAbsolutePath());
+        if (file.getNodeType() == 2) {
+            searchService.index(file);
+        }
+
+        return Result.success();
+    }
+
+    @DeleteMapping("/{id}/permanent")
+    public Result<Void> permanentDelete(@PathVariable Long id) {
+        // 使用自定义 Mapper 方法绕过逻辑删除过滤
+        AssetFile file = assetFileMapper.selectByIdWithDeleted(id);
+        if (file == null) return Result.error("文件不存在");
+
+        // 1. 物理删除回收站文件
+        if (file.getLocalPath() != null && !file.getLocalPath().isEmpty()) {
+            java.io.File physicalFile = new java.io.File(file.getLocalPath());
+            if (physicalFile.exists() && physicalFile.getAbsolutePath().contains("recycle_bin")) {
+                physicalFile.delete();
+            }
+        }
+
+        // 2. 数据库物理删除
+        assetFileMapper.deleteByIdPhysically(id);
+
+        return Result.success();
+    }
+
+    @PostMapping("/restore-all")
+    public Result<String> restoreAll() {
+        List<AssetFile> deletedFiles = assetFileMapper.selectDeletedFiles();
+        if (deletedFiles.isEmpty()) {
+            return Result.error("回收站为空");
+        }
+
+        String taskId = UUID.randomUUID().toString();
+        BatchProgress progress = new BatchProgress();
+        progress.total = deletedFiles.size();
+        batchProgressMap.put(taskId, progress);
+
+        new Thread(() -> {
+            try {
+                for (AssetFile file : deletedFiles) {
+                    try {
+                        restore(file.getId());
+                    } catch (Exception e) {
+                        log.error("Batch restore failed for file {}: {}", file.getId(), e.getMessage());
+                    }
+                    progress.current++;
+                }
+                progress.status = "finished";
+            } catch (Exception e) {
+                progress.status = "error";
+                progress.message = e.getMessage();
+            }
+        }).start();
+
+        return Result.success(taskId);
+    }
+
+    @DeleteMapping("/permanent-all")
+    public Result<String> permanentDeleteAll() {
+        List<AssetFile> deletedFiles = assetFileMapper.selectDeletedFiles();
+        if (deletedFiles.isEmpty()) {
+            return Result.error("回收站为空");
+        }
+
+        String taskId = UUID.randomUUID().toString();
+        BatchProgress progress = new BatchProgress();
+        progress.total = deletedFiles.size();
+        batchProgressMap.put(taskId, progress);
+
+        new Thread(() -> {
+            try {
+                for (AssetFile file : deletedFiles) {
+                    try {
+                        permanentDelete(file.getId());
+                    } catch (Exception e) {
+                        log.error("Batch permanent delete failed for file {}: {}", file.getId(), e.getMessage());
+                    }
+                    progress.current++;
+                }
+                progress.status = "finished";
+            } catch (Exception e) {
+                progress.status = "error";
+                progress.message = e.getMessage();
+            }
+        }).start();
+
+        return Result.success(taskId);
+    }
+
+    @GetMapping("/batch-progress/{taskId}")
+    public Result<BatchProgress> getBatchProgress(@PathVariable String taskId) {
+        BatchProgress progress = batchProgressMap.get(taskId);
+        if (progress == null) {
+            return Result.error("任务不存在");
+        }
+        return Result.success(progress);
     }
 
     @PutMapping("/{id}/move")

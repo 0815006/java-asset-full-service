@@ -1,1 +1,0 @@
-ALTER TABLE asset_product ADD COLUMN product_code VARCHAR(50) NOT NULL DEFAULT '' COMMENT '产品英文简称' AFTER product_name;
