@@ -2,12 +2,15 @@ package com.asset.controller;
 
 import com.asset.common.Result;
 import com.asset.common.TokenUtils;
+import com.asset.dto.ChangePasswordDTO;
 import com.asset.entity.User;
 import com.asset.service.UserService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+import javax.servlet.http.HttpServletRequest;
 import java.util.HashMap;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +26,9 @@ public class LoginController {
 
     @Autowired
     private TokenUtils tokenUtils;
+
+    @Autowired
+    private BCryptPasswordEncoder passwordEncoder;
 
     @org.springframework.beans.factory.annotation.Value("${auth.verify-internal-password:false}")
     private boolean verifyInternalPassword;
@@ -61,7 +67,7 @@ public class LoginController {
         }
 
         if (needVerify) {
-            if (password == null || !password.equals(user.getPasswordHash())) {
+            if (password == null || !passwordEncoder.matches(password, user.getPasswordHash())) {
                 log.warn("Login failed for user '{}': incorrect password", username);
                 return Result.error("密码错误");
             }
@@ -73,5 +79,20 @@ public class LoginController {
         data.put("user", user);
 
         return Result.success(data);
+    }
+
+    @PostMapping("/user/change-password")
+    public Result<String> changePassword(@RequestBody ChangePasswordDTO changePasswordDTO, HttpServletRequest request) {
+        Integer userId = tokenUtils.getUserIdFromRequest(request);
+        if (userId == null) {
+            return Result.error("用户未登录或Token无效");
+        }
+        // 调用Service层处理密码修改逻辑
+        boolean success = userService.changePassword(userId, changePasswordDTO.getOldPassword(), changePasswordDTO.getNewPassword());
+        if (success) {
+            return Result.success("密码修改成功");
+        } else {
+            return Result.error("旧密码不正确或密码修改失败");
+        }
     }
 }

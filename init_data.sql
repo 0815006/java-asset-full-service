@@ -10,10 +10,10 @@ TRUNCATE TABLE `edit_lock`;
 
 -- Users
 INSERT INTO `asset_user` (`id`, `username`, `password_hash`, `real_name`, `emp_no`, `role_type`) VALUES
-(1, 'admin', 'c47592d032708dc847337bdcd70d9e6d', '系统管理员', 'ADMIN001', 1),
-(2, 'chendong', 'c47592d032708dc847337bdcd70d9e6d', '陈东', 'NO.9527', 2),
-(3, 'linlin', 'c47592d032708dc847337bdcd70d9e6d', '林琳', 'NO.9528', 2),
-(4, 'wangqiang', 'c47592d032708dc847337bdcd70d9e6d', '王强', 'NO.9529', 3);
+(1, 'admin', '$2a$10$fsdSi9dTN4/HwXq9hDLzreKo2X7B5QqcbjqVswbPMLx/eHKz00VRu', '系统管理员', 'ADMIN001', 1),
+(2, 'chendong', '$2a$10$fsdSi9dTN4/HwXq9hDLzreKo2X7B5QqcbjqVswbPMLx/eHKz00VRu', '陈东', 'NO.9527', 2),
+(3, 'linlin', '$2a$10$fsdSi9dTN4/HwXq9hDLzreKo2X7B5QqcbjqVswbPMLx/eHKz00VRu', '林琳', 'NO.9528', 2),
+(4, 'wangqiang', '$2a$10$fsdSi9dTN4/HwXq9hDLzreKo2X7B5QqcbjqVswbPMLx/eHKz00VRu', '王强', 'NO.9529', 3);
 
 -- Products
 INSERT INTO `asset_product` (`id`, `product_code`, `product_name`, `team_name`, `domain_name`, `owner_id`, `asset_count`) VALUES

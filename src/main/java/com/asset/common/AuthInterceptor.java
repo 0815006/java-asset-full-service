@@ -26,7 +26,13 @@ public class AuthInterceptor implements HandlerInterceptor {
             return true;
         }
 
-        // 校验 Token
+        // 如果 Spring Security 已经认证，则直接放行
+        if (org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication() != null &&
+            org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().isAuthenticated()) {
+            return true;
+        }
+
+        // 否则，执行原有的 Token 校验逻辑
         String token = null;
         String authHeader = request.getHeader("Authorization");
         if (authHeader != null && authHeader.startsWith("Bearer ")) {

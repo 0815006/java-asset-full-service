@@ -4,6 +4,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Base64;
+import javax.servlet.http.HttpServletRequest;
 
 @Component
 public class TokenUtils {
@@ -52,6 +53,19 @@ public class TokenUtils {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * 从请求头中获取 Token 并解析出 userId
+     */
+    public Integer getUserIdFromRequest(HttpServletRequest request) {
+        String token = request.getHeader("Authorization");
+        if (token != null && token.startsWith("Bearer ")) {
+            token = token.substring(7);
+            Long userId = verifyToken(token);
+            return userId != null ? userId.intValue() : null;
+        }
+        return null;
     }
 
     private String sign(String data) {

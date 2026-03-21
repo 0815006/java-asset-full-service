@@ -65,6 +65,9 @@ public class AssetFileController {
     @Autowired
     private IProductUseRankingService productUseRankingService;
 
+    @Autowired
+    private com.asset.service.ProductService productService;
+
     private static final Set<String> syncingKeys = Collections.synchronizedSet(new HashSet<>());
     private static final Map<String, SyncProgress> syncProgressMap = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<String, BatchProgress> batchProgressMap = new java.util.concurrent.ConcurrentHashMap<>();
@@ -343,6 +346,11 @@ public class AssetFileController {
                     String currentTreePath = parentTreePath + newFile.getId() + "/";
                     newFile.setTreePath(currentTreePath);
                     assetFileService.updateById(newFile);
+                    
+                    // 更新产品资产总数
+                    if (productId != null && productId > 0) {
+                        productService.updateAssetCount(productId, 1);
+                    }
                     
                     if (!isDir) {
                         try {
@@ -678,6 +686,11 @@ public class AssetFileController {
         // 2. 数据库软删除 (MyBatis Plus 自动处理 is_deleted)
         assetFileService.removeById(id);
         
+        // 更新产品资产总数
+        if (file.getProductId() != null && file.getProductId() > 0) {
+            productService.updateAssetCount(file.getProductId(), -1);
+        }
+        
         // 3. 同步删除 Solr 索引
         searchService.delete(id);
         
@@ -749,6 +762,11 @@ public class AssetFileController {
 
         // 4. 数据库状态恢复
         assetFileMapper.restoreById(id, targetFile.getAbsolutePath());
+        
+        // 更新产品资产总数
+        if (file.getProductId() != null && file.getProductId() > 0) {
+            productService.updateAssetCount(file.getProductId(), 1);
+        }
         
         // 5. 重新同步 Solr
         file.setIsDeleted(0);
@@ -954,6 +972,11 @@ public class AssetFileController {
             
             newFile.setLocalPath(dest.getAbsolutePath());
             assetFileService.updateById(newFile);
+
+            // 更新产品资产总数
+            if (productId != null && productId > 0) {
+                productService.updateAssetCount(productId, 1);
+            }
         } catch (java.io.IOException e) {
             return Result.error("文件保存失败: " + e.getMessage());
         }
