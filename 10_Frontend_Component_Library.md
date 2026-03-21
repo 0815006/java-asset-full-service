@@ -10,6 +10,8 @@ Last_Modified: 2026-03-20
 
 # 10 前端组件库规范 (Frontend Component Library)
 
+本指南详细说明了前端项目的页面构成、核心组件功能，以及它们与后端 API 的交互方式。
+
 > **核心目标**：确保 Vue 2 + Element UI 的组件风格统一，实现“深色极客风”的视觉效果。
 
 ## 1. 技术栈
@@ -18,7 +20,17 @@ Last_Modified: 2026-03-20
 *   **样式**：SCSS + Scoped CSS
 *   **图标**：Element UI 内置图标 + 自定义 SVG
 
-## 2. 核心组件拆分
+## 2. 页面构成 (Page Structure)
+
+本节列出了前端项目中的主要页面视图。
+
+### 2.0.1 `Home.vue` - 资产全景首页
+*   **功能**：作为应用的主入口，聚合展示各类资产信息，提供全局搜索、专区内容展示和健康检查入口。
+
+### 2.0.2 `ProductDetail.vue` - 产品详情页
+*   **功能**：展示特定产品的详细信息，包括产品内搜索、文件目录树、文件上传和打包下载等功能。
+
+## 2.1 核心组件拆分
 
 ### 2.1 资产展示组件 (`AssetItem.vue`)
 *   **功能**：单个资产（文件/文件夹）的卡片式展示。
@@ -45,6 +57,13 @@ Last_Modified: 2026-03-20
 *   **`SearchResultDialog.vue`**：全局搜索结果展示，支持关键字高亮。
 *   **`RecycleBinDialog.vue`**：回收站管理，支持恢复与彻底删除。
 *   **`UpdateFileDialog.vue`**：版本更新上传对话框。
+*   **`StorageHealthCheckDialog.vue`**：存储健康检查弹窗。
+*   **`IndexHealthCheckDialog.vue`**：索引健康检查弹窗。
+
+### 2.5 内容专区组件
+*   **`TechZoneContent.vue`**：测试技术及工艺专区内容展示。
+*   **`MgmtZoneContent.vue`**：测试管理专区内容展示。
+*   **`ProductZoneContent.vue`**：产品专区内容展示。
 
 ## 3. 全局样式变量 (深色极客风)
 ```scss
