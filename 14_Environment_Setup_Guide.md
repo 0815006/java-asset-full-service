@@ -46,23 +46,26 @@ Last_Modified: 2026-03-20
 
 ## 4. 后端服务部署 (SpringBoot)
 1.  **打包**：`mvn clean package` 生成 `java-asset-full-service-0.0.1-SNAPSHOT.jar`。
-2.  **外部配置**：在 Jar 包同级目录创建 `application.yml`，覆盖关键配置：
+2.  **环境配置**：系统已内置 `application-prod.yml` 生产环境配置。
+    *   **方式 A (推荐)**：启动时激活 `prod` 配置文件，并通过命令行参数覆盖敏感信息。
+    *   **方式 B (外部配置)**：在 Jar 包同级目录创建 `application-prod.yml`，Spring Boot 会优先加载外部文件。
     ```yaml
+    # 外部 application-prod.yml 示例
     spring:
       datasource:
-        url: jdbc:mysql://<DB_IP>:3306/asset_db?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai
-        username: <USER>
-        password: <PWD>
+        url: jdbc:mysql://<实际数据库IP>:3306/asset_db?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai
+        username: <用户名>
+        password: <密码>
       data:
         solr:
-          host: http://<SOLR_IP>:8983/solr
+          host: http://<实际SolrIP>:8983/solr
     file:
       upload-dir: /data/asset_files
       recycle-bin-dir: /data/asset_recycle_bin
     ```
-3.  **启动**：
+3.  **启动**：使用 `--spring.profiles.active=prod` 激活生产配置。
     ```bash
-    nohup java -jar java-asset-full-service-0.0.1-SNAPSHOT.jar > app.log 2>&1 &
+    nohup java -jar java-asset-full-service-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod > app.log 2>&1 &
     ```
 
 ## 5. 前端服务部署 (Vue + Nginx)
