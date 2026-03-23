@@ -1,0 +1,37 @@
+# ===================================================================
+# 生产环境配置文件 (Production Profile)
+# 适用于正式服务器部署。
+# ===================================================================
+
+server:
+  # 生产环境服务端口 (通常为 80 或 443)
+  port: 8081
+
+spring:
+  datasource:
+    # 生产环境数据库连接地址 (请替换为实际服务器 IP)
+    url: jdbc:mysql://22.188.9.144:3306/allstar?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai
+    # 生产环境数据库用户名
+    username: root
+    # 生产环境数据库密码 (务必通过环境变量或加密存储)
+    password: Star002! 
+  
+  redis:
+    # 生产环境 Redis 地址
+    host: localhost
+    port: 6379
+  
+  data:
+    solr:
+      # 生产环境 Solr 服务器地址
+      host: http://localhost:8983/solr
+
+file:
+  # 生产环境文件上传存储根目录 (Linux 路径示例)
+  upload-dir: /allstar/app/data/asset_files
+  # 生产环境回收站存储目录
+  recycle-bin-dir: /allstar/app/data/asset_recycle_bin
+
+auth:
+  # 生产环境开关：强制对内部人员进行密码校验
+  verify-internal-password: true
