@@ -28,20 +28,20 @@ spring:
 
 file:
   # 本地文件上传存储根目录 (Windows 路径示例)
-  upload-dir: D:/data/asset_files
+  upload-dir: /root/asset/data/asset_files
   # 本地回收站存储目录
-  recycle-bin-dir: D:/data/asset_recycle_bin
+  recycle-bin-dir: /root/asset/data/asset_recycle_bin
 
 auth:
   # 开发环境开关：是否对内部人员(role_type 1,2,3)校验密码
   # 设置为 false 则内部人员只需输入用户名即可登录，方便调试
   verify-internal-password: false
   # 登录 Token 有效期 (小时)
-  token-expiration-hours: 6
+  token-expiration-hours: 24
   # JWT 签名密钥 (生产环境务必修改)
   secret-key: asset-management-secret-key-2026
   # 用户校验源：asset (内置表), sys (外部系统表)
-  user-source: sys
+  user-source: asset
   # AES 加密配置 (用于传输安全)
   aes-key: "ihaierForTodoKey"
   aes-iv: "ihaierForTodo_Iv"

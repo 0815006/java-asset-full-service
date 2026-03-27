@@ -13,7 +13,7 @@ INSERT INTO `asset_user` (`id`, `username`, `password_hash`, `real_name`, `emp_n
 (1, 'admin', '$2a$10$fsdSi9dTN4/HwXq9hDLzreKo2X7B5QqcbjqVswbPMLx/eHKz00VRu', '系统管理员', 'ADMIN001', 1),
 (2, 'chendong', '$2a$10$fsdSi9dTN4/HwXq9hDLzreKo2X7B5QqcbjqVswbPMLx/eHKz00VRu', '陈东', 'NO.9527', 2),
 (3, 'linlin', '$2a$10$fsdSi9dTN4/HwXq9hDLzreKo2X7B5QqcbjqVswbPMLx/eHKz00VRu', '林琳', 'NO.9528', 2),
-(4, 'wangqiang', '$2a$10$fsdSi9dTN4/HwXq9hDLzreKo2X7B5QqcbjqVswbPMLx/eHKz00VRu', '王强', 'NO.9529', 3);
+(4, 'tianqingpeng', '$2a$10$fsdSi9dTN4/HwXq9hDLzreKo2X7B5QqcbjqVswbPMLx/eHKz00VRu', '田清鹏', 'NO.9529', 3);
 
 -- Products
 INSERT INTO `asset_product` (`id`, `product_code`, `product_name`, `team_name`, `domain_name`, `owner_id`, `asset_count`) VALUES

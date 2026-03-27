@@ -76,7 +76,7 @@ Last_Modified: 2026-03-20
     ```
 3.  **启动**：使用 `--spring.profiles.active=prod` 激活生产配置。
     ```bash
-    nohup java -jar java-asset-full-service-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod > app.log 2>&1 &
+    nohup java -jar java-asset-full-service-0.0.1-SNAPSHOT.jar --spring.profiles.active=dev > app.log 2>&1 &
     ```
 
 ## 6. 前端服务部署 (Vue + Nginx)
@@ -84,22 +84,35 @@ Last_Modified: 2026-03-20
 2.  **Nginx 配置**：
     ```nginx
     server {
-        listen 8011;
+        listen 80;
         server_name asset.bank.com;
 
         location / {
-            root /var/www/asset-web/dist;
+            root /usr/share/nginx/html;
             index index.html;
             # 支持 hash 模式
         }
 
         location /api {
-            proxy_pass http://<BACKEND_IP>:8081;
+        	# 使用 host.docker.internal 访问宿主机的 8081 端口
+            proxy_pass http://host.docker.internal:8081;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
         }
     }
     ```
+
+```bash
+docker run -d \
+  --name nginx \
+  -p 8011:80 \
+  --add-host=host.docker.internal:host-gateway \
+  -v /root/nginx/html:/usr/share/nginx/html \
+  -v /root/nginx/conf/default.conf:/etc/nginx/conf.d/default.conf \
+  --restart always \
+  nginx:latest
+```
+
 
 ## 7. 预览服务部署 (OnlyOffice)
 ```bash
