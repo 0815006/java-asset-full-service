@@ -15,6 +15,10 @@ import java.util.HashMap;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 
+/**
+ * 登录认证控制器
+ * 处理用户登录、Token 生成及密码修改
+ */
 @Slf4j
 @RestController
 @RequestMapping("/api")
@@ -33,6 +37,11 @@ public class LoginController {
     @org.springframework.beans.factory.annotation.Value("${auth.verify-internal-password:false}")
     private boolean verifyInternalPassword;
 
+    /**
+     * 用户登录
+     * @param loginData 包含 username, password
+     * @return 包含 Token 和用户信息
+     */
     @PostMapping("/login")
     public Result<Map<String, Object>> login(@RequestBody Map<String, String> loginData) {
         String username = loginData.get("username");
@@ -81,6 +90,12 @@ public class LoginController {
         return Result.success(data);
     }
 
+    /**
+     * 修改用户密码
+     * @param changePasswordDTO 包含旧密码和新密码
+     * @param request HTTP 请求（用于提取当前用户 ID）
+     * @return 操作结果
+     */
     @PostMapping("/user/change-password")
     public Result<String> changePassword(@RequestBody ChangePasswordDTO changePasswordDTO, HttpServletRequest request) {
         Integer userId = tokenUtils.getUserIdFromRequest(request);

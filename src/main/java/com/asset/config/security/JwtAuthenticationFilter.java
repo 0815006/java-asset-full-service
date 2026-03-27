@@ -33,6 +33,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             token = authHeader.substring(7);
+        } else {
+            // 尝试从 URL 参数中获取 token (用于文件预览/下载等场景)
+            token = request.getParameter("token");
+        }
+
+        if (token != null) {
             try {
                 userId = tokenUtils.verifyToken(token);
             } catch (Exception e) {

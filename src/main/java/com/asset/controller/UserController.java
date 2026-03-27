@@ -8,6 +8,10 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/**
+ * 用户管理控制器
+ * 处理用户信息查询
+ */
 @RestController
 @RequestMapping("/api/users")
 @CrossOrigin
@@ -16,6 +20,10 @@ public class UserController {
     @Autowired
     private UserService userService;
 
+    /**
+     * 获取所有用户列表
+     * @return 用户列表（已脱敏）
+     */
     @GetMapping("/list")
     public Result<List<User>> list() {
         List<User> users = userService.list();

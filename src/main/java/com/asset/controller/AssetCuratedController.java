@@ -9,6 +9,10 @@ import java.util.Collections;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 
+/**
+ * 核心资产管理控制器
+ * 处理资产的“核心”状态标记与查询
+ */
 @Slf4j
 @RestController
 @RequestMapping("/api/assets/curated")
@@ -18,6 +22,11 @@ public class AssetCuratedController {
     @Autowired
     private IAssetCuratedService assetCuratedService;
 
+    /**
+     * 切换资产的核心状态
+     * @param payload 包含 fileId, productId, isCurated
+     * @return 统一响应结果
+     */
     @PostMapping
     public Result<?> toggleCuratedStatus(@RequestBody Map<String, Object> payload) {
         Long fileId = Long.valueOf(payload.get("fileId").toString());
@@ -28,6 +37,12 @@ public class AssetCuratedController {
         return Result.success();
     }
 
+    /**
+     * 查询资产是否为核心资产
+     * @param fileId 文件ID
+     * @param productId 产品ID
+     * @return 包含 isCurated 状态的 Map
+     */
     @GetMapping("/status")
     public Result<Map<String, Boolean>> getCuratedStatus(@RequestParam Long fileId, @RequestParam Long productId) {
         log.info("Checking curated status for fileId: {}, productId: {}", fileId, productId);

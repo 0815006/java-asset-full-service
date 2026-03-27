@@ -20,7 +20,13 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.ResponseEntity;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.http.MediaType;
+import org.springframework.http.HttpHeaders;
 
+import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -35,6 +41,10 @@ import java.util.zip.ZipOutputStream;
 import java.util.Comparator;
 import lombok.extern.slf4j.Slf4j;
 
+/**
+ * 资产文件管理控制器
+ * 处理文件的上传、下载、预览、树形结构、同步及健康检查等核心业务
+ */
 @Slf4j
 @RestController
 @RequestMapping("/api/assets")
@@ -125,8 +135,18 @@ public class AssetFileController {
         // 2. 拼接树形结构路径（不包含自身）
         if (file.getTreePath() != null) {
             String[] ids = file.getTreePath().split("/");
+            boolean isFirstNode = true; // 用于识别并跳过专区根节点
             for (String idStr : ids) {
                 if (idStr.isEmpty() || idStr.equals("0")) continue;
+                
+                // 如果是技术或管理专区，跳过 treePath 中的第一个有效节点（即数据库中的虚拟专区根节点）
+                // 这样物理路径就不会包含“/测试技术与工艺专区”或“/管理专区”这一层
+                if (!"product_zone".equals(zone) && isFirstNode) {
+                    isFirstNode = false;
+                    continue;
+                }
+                isFirstNode = false;
+
                 Long id = Long.valueOf(idStr);
                 if (id.equals(file.getId())) continue;
                 
@@ -147,6 +167,9 @@ public class AssetFileController {
         return findRootNode(parent);
     }
 
+    /**
+     * 获取指定专区/产品的存储物理路径
+     */
     @GetMapping("/storage-path")
     public Result<String> getStoragePath(@RequestParam("type") String type, @RequestParam(value = "product_id", required = false) Long productId) {
         String zone = type;
@@ -158,6 +181,9 @@ public class AssetFileController {
         return Result.success(path.replace("//", "/"));
     }
 
+    /**
+     * 创建存储根目录
+     */
     @PostMapping("/create-root-dir")
     public Result<Void> createRootDir(@RequestBody Map<String, Object> body) {
         String type = (String) body.get("type");
@@ -195,8 +221,11 @@ public class AssetFileController {
         return count;
     }
 
+    /**
+     * 一键入库：将物理存储中存在但数据库中缺失的文件同步到数据库
+     */
     @PostMapping("/sync-extra")
-    public Result<Void> syncExtra(@RequestBody Map<String, Object> body) {
+    public Result<Void> syncExtra(@RequestBody Map<String, Object> body, @RequestHeader(value = "X-User-Id", required = false) Long userId) {
         String type = (String) body.get("type");
         Long productId = 0L;
         if (body.get("product_id") != null && !body.get("product_id").toString().isEmpty()) {
@@ -228,6 +257,7 @@ public class AssetFileController {
 
         // 异步执行入库
         Long finalProductId = productId;
+        Long finalUserId = userId != null ? userId : 2L; // 默认陈东作为兜底
         new Thread(() -> {
             try {
                 // 2. 获取该单元的所有数据库记录
@@ -265,7 +295,7 @@ public class AssetFileController {
                 Map<Long, List<AssetFile>> dbMap = dbFiles.stream().collect(Collectors.groupingBy(AssetFile::getParentId));
 
                 // 3. 递归同步
-                syncRecursive(baseDir, startParentId, parentTreePath, finalProductId, dbMap, progress);
+                syncRecursive(baseDir, startParentId, parentTreePath, finalProductId, dbMap, progress, finalUserId);
 
                 progress.isFinished = true;
             } catch (Exception e) {
@@ -280,6 +310,9 @@ public class AssetFileController {
         return Result.success();
     }
 
+    /**
+     * 获取入库进度
+     */
     @GetMapping("/sync-progress")
     public Result<SyncProgress> getSyncProgress(@RequestParam("type") String type, @RequestParam(value = "product_id", required = false) Long productId) {
         Long pid = productId != null ? productId : 0L;
@@ -294,7 +327,7 @@ public class AssetFileController {
         return Result.success(progress);
     }
 
-    private void syncRecursive(java.io.File physicalDir, Long dbParentId, String parentTreePath, Long productId, Map<Long, List<AssetFile>> dbMap, SyncProgress progress) {
+    private void syncRecursive(java.io.File physicalDir, Long dbParentId, String parentTreePath, Long productId, Map<Long, List<AssetFile>> dbMap, SyncProgress progress, Long userId) {
         List<AssetFile> dbChildren = dbMap.getOrDefault(dbParentId, new ArrayList<>());
         java.io.File[] physicalChildren = physicalDir.exists() ? physicalDir.listFiles() : new java.io.File[0];
         if (physicalChildren == null) physicalChildren = new java.io.File[0];
@@ -329,7 +362,7 @@ public class AssetFileController {
                     newFile.setIsLatest(1);
                     newFile.setVersionNo(1);
                     newFile.setParseStatus(isDir ? 0 : 1);
-                    newFile.setCreatedBy(2L); // 默认陈东
+                    newFile.setCreatedBy(userId); 
                     newFile.setCreatedAt(java.time.LocalDateTime.now());
                     newFile.setUpdatedAt(java.time.LocalDateTime.now());
                     
@@ -369,7 +402,7 @@ public class AssetFileController {
 
             // 如果是目录，递归处理子目录
             if (isDir && currentDbFile != null) {
-                syncRecursive(pFile, currentDbFile.getId(), currentDbFile.getTreePath(), productId, dbMap, progress);
+                syncRecursive(pFile, currentDbFile.getId(), currentDbFile.getTreePath(), productId, dbMap, progress, userId);
             }
             
             progress.processedFiles++;
@@ -377,6 +410,9 @@ public class AssetFileController {
         }
     }
 
+    /**
+     * 存储健康检查：比对数据库记录与物理存储的一致性
+     */
     @GetMapping("/health-check")
     public Result<HealthCheckNode> healthCheck(@RequestParam("type") String type, @RequestParam(value = "product_id", required = false) Long productId) {
         String zone = type; // tech_zone, mgmt_zone, product_zone
@@ -534,8 +570,13 @@ public class AssetFileController {
         return ""; // 暂时简化
     }
 
+    /**
+     * 获取资产树结构（支持懒加载）
+     */
     @GetMapping("/tree")
-    public Result<List<AssetFile>> getTree(@RequestParam("product_id") Long productId, @RequestParam("parent_id") Long parentId, @RequestParam(value = "userId", required = false) Long userId) {
+    public Result<List<AssetFile>> getTree(@RequestParam("product_id") Long productId, 
+                                           @RequestParam("parent_id") Long parentId, 
+                                           @RequestHeader(value = "X-User-Id", required = false) Long userId) {
         List<AssetFile> list = assetFileService.list(new LambdaQueryWrapper<AssetFile>()
                 .eq(AssetFile::getProductId, productId)
                 .eq(AssetFile::getParentId, parentId)
@@ -581,8 +622,11 @@ public class AssetFileController {
         return Result.success(list);
     }
 
+    /**
+     * 创建新文件夹
+     */
     @PostMapping("/folder")
-    public Result<AssetFile> createFolder(@RequestBody Map<String, Object> body) {
+    public Result<AssetFile> createFolder(@RequestBody Map<String, Object> body, @RequestHeader(value = "X-User-Id", required = false) Long userId) {
         Long productId = Long.valueOf(body.get("product_id").toString());
         Long parentId = Long.valueOf(body.get("parent_id").toString());
         String folderName = (String) body.get("folder_name");
@@ -607,7 +651,7 @@ public class AssetFileController {
         folder.setIsLatest(1);
         folder.setVersionNo(1);
         folder.setParseStatus(0); // 无需解析
-        folder.setCreatedBy(2L); // 陈东
+        folder.setCreatedBy(userId != null ? userId : 2L); 
         folder.setCreatedAt(java.time.LocalDateTime.now());
         folder.setUpdatedAt(java.time.LocalDateTime.now());
         
@@ -643,6 +687,9 @@ public class AssetFileController {
         return Result.success(folder);
     }
 
+    /**
+     * 重命名资产
+     */
     @PutMapping("/{id}/rename")
     public Result<Void> rename(@PathVariable Long id, @RequestBody Map<String, String> body) {
         String newName = body.get("new_name");
@@ -654,6 +701,9 @@ public class AssetFileController {
         return Result.success();
     }
     
+    /**
+     * 删除资产（逻辑删除并移动物理文件到回收站）
+     */
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         AssetFile file = assetFileService.getById(id);
@@ -703,6 +753,9 @@ public class AssetFileController {
         return Result.success();
     }
 
+    /**
+     * 获取回收站列表
+     */
     @GetMapping("/recycle-bin")
     public Result<List<Map<String, Object>>> getRecycleBin() {
         // 使用自定义 Mapper 方法绕过逻辑删除过滤
@@ -725,6 +778,9 @@ public class AssetFileController {
         return Result.success(result);
     }
 
+    /**
+     * 恢复已删除的资产
+     */
     @PostMapping("/{id}/restore")
     public Result<Void> restore(@PathVariable Long id) {
         // 使用自定义 Mapper 方法绕过逻辑删除过滤
@@ -778,6 +834,9 @@ public class AssetFileController {
         return Result.success();
     }
 
+    /**
+     * 彻底删除资产（物理删除）
+     */
     @DeleteMapping("/{id}/permanent")
     public Result<Void> permanentDelete(@PathVariable Long id) {
         // 使用自定义 Mapper 方法绕过逻辑删除过滤
@@ -798,6 +857,9 @@ public class AssetFileController {
         return Result.success();
     }
 
+    /**
+     * 批量恢复回收站所有资产
+     */
     @PostMapping("/restore-all")
     public Result<String> restoreAll() {
         List<AssetFile> deletedFiles = assetFileMapper.selectDeletedFiles();
@@ -830,6 +892,9 @@ public class AssetFileController {
         return Result.success(taskId);
     }
 
+    /**
+     * 批量彻底删除回收站所有资产
+     */
     @DeleteMapping("/permanent-all")
     public Result<String> permanentDeleteAll() {
         List<AssetFile> deletedFiles = assetFileMapper.selectDeletedFiles();
@@ -862,6 +927,9 @@ public class AssetFileController {
         return Result.success(taskId);
     }
 
+    /**
+     * 获取批量操作进度
+     */
     @GetMapping("/batch-progress/{taskId}")
     public Result<BatchProgress> getBatchProgress(@PathVariable String taskId) {
         BatchProgress progress = batchProgressMap.get(taskId);
@@ -871,6 +939,9 @@ public class AssetFileController {
         return Result.success(progress);
     }
 
+    /**
+     * 移动资产到新目录
+     */
     @PutMapping("/{id}/move")
     public Result<Map<String, String>> move(@PathVariable Long id, @RequestBody Map<String, Long> body) {
         Long targetParentId = body.get("target_parent_id");
@@ -905,11 +976,15 @@ public class AssetFileController {
         return Result.success(res);
     }
 
+    /**
+     * 上传新文件
+     */
     @PostMapping("/upload")
     public Result<AssetFile> upload(@RequestParam("file") MultipartFile file,
                                     @RequestParam("product_id") Long productId,
                                     @RequestParam("parent_id") Long parentId,
-                                    @RequestParam(required = false) String zoneType) {
+                                    @RequestParam(required = false) String zoneType,
+                                    @RequestHeader(value = "X-User-Id", required = false) Long userId) {
         // 模拟上传逻辑
         String fileName = file.getOriginalFilename();
         String ext = "";
@@ -943,7 +1018,7 @@ public class AssetFileController {
         newFile.setIsLatest(1);
         newFile.setNodeType(2); // 文件
         newFile.setParseStatus(1); // 排队中
-        newFile.setCreatedBy(2L); // 默认陈东
+        newFile.setCreatedBy(userId != null ? userId : 2L); 
         newFile.setCreatedAt(java.time.LocalDateTime.now());
         newFile.setUpdatedAt(java.time.LocalDateTime.now());
         
@@ -987,8 +1062,13 @@ public class AssetFileController {
         return Result.success(newFile);
     }
     
+    /**
+     * 更新现有文件（版本升级）
+     */
     @PostMapping("/{id}/update")
-    public Result<AssetFile> updateFile(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
+    public Result<AssetFile> updateFile(@PathVariable Long id, 
+                                        @RequestParam("file") MultipartFile file,
+                                        @RequestHeader(value = "X-User-Id", required = false) Long userId) {
         AssetFile oldFile = assetFileService.getById(id);
         if (oldFile == null) return Result.error("原文件不存在");
         
@@ -1009,7 +1089,7 @@ public class AssetFileController {
         newFile.setIsLatest(1);
         newFile.setNodeType(2);
         newFile.setParseStatus(1);
-        newFile.setCreatedBy(2L); // 默认陈东
+        newFile.setCreatedBy(userId != null ? userId : 2L); 
         newFile.setCreatedAt(java.time.LocalDateTime.now());
         newFile.setUpdatedAt(java.time.LocalDateTime.now());
         
@@ -1029,8 +1109,11 @@ public class AssetFileController {
         return Result.success(newFile);
     }
 
+    /**
+     * 获取资产详情
+     */
     @GetMapping("/{id}/details")
-    public Result<AssetFile> getAssetDetails(@PathVariable Long id, @RequestParam(value = "userId", required = false) Long userId) {
+    public Result<AssetFile> getAssetDetails(@PathVariable Long id, @RequestHeader(value = "X-User-Id", required = false) Long userId) {
         AssetFile file = assetFileService.getById(id);
         if (file == null) {
             return Result.error("File not found");
@@ -1072,8 +1155,11 @@ public class AssetFileController {
         return false;
     }
 
+    /**
+     * 获取资产详情（别名接口）
+     */
     @GetMapping("/{id}/detail")
-    public Result<AssetFile> detail(@PathVariable Long id, @RequestParam(value = "userId", required = false) Long userId) {
+    public Result<AssetFile> detail(@PathVariable Long id, @RequestHeader(value = "X-User-Id", required = false) Long userId) {
         AssetFile file = assetFileService.getById(id);
         if (file == null) return Result.error("文件不存在");
 
@@ -1086,35 +1172,35 @@ public class AssetFileController {
         return Result.success(file);
     }
 
+    /**
+     * 预览或下载文件内容
+     * 使用 ResponseEntity<Resource> 以支持 HTTP Range 请求（分段加载），解决大文件及 PDF 预览问题
+     */
     @GetMapping("/{id}/view")
-    public void viewFile(@PathVariable Long id, 
+    public ResponseEntity<Resource> viewFile(@PathVariable Long id, 
                          @RequestParam(value = "download", required = false, defaultValue = "false") boolean download,
                          @RequestParam(value = "userId", required = false) Long userId,
-                         HttpServletResponse response) {
-        System.out.println("收到预览/下载请求，ID=" + id + ", download=" + download);
+                         @RequestHeader(value = "X-User-Id", required = false) Long headerUserId,
+                         HttpServletRequest request) {
+        log.info("收到预览/下载请求，ID={}, download={}, method={}", id, download, request.getMethod());
         AssetFile file = assetFileService.getById(id);
         if (file == null) {
-            System.err.println("请求失败：文件记录不存在, ID=" + id);
-            response.setStatus(404);
-            return;
+            return ResponseEntity.notFound().build();
         }
         
         if (file.getLocalPath() == null || file.getLocalPath().isEmpty()) {
-            System.err.println("请求失败：文件物理路径为空, ID=" + id + ", FileName=" + file.getFileName());
-            response.setStatus(404);
-            return;
+            return ResponseEntity.notFound().build();
         }
         
         java.io.File physicalFile = new java.io.File(file.getLocalPath());
         if (!physicalFile.exists()) {
-            System.err.println("请求失败：物理文件不存在, ID=" + id + ", Path=" + file.getLocalPath());
-            response.setStatus(404);
-            return;
+            return ResponseEntity.notFound().build();
         }
         
         String contentType = "application/octet-stream";
         String ext = file.getExt();
-        if (ext == null && file.getFileName().contains(".")) {
+        // 增强后缀名识别逻辑，处理 ext 为空的情况
+        if ((ext == null || ext.isEmpty()) && file.getFileName().contains(".")) {
             ext = file.getFileName().substring(file.getFileName().lastIndexOf(".") + 1);
         }
         
@@ -1133,44 +1219,47 @@ public class AssetFileController {
                 "c".equalsIgnoreCase(ext) || "cpp".equalsIgnoreCase(ext) || "h".equalsIgnoreCase(ext) || "go".equalsIgnoreCase(ext) || "php".equalsIgnoreCase(ext) || "csv".equalsIgnoreCase(ext)) {
             contentType = "text/plain;charset=UTF-8";
         }
-        
-        response.setContentType(contentType);
-        
-        if (download) {
-            try {
-                String encodedFileName = java.net.URLEncoder.encode(file.getFileName(), "UTF-8").replaceAll("\\+", "%20");
-                response.setHeader("Content-Disposition", "attachment; filename=\"" + encodedFileName + "\"");
-            } catch (java.io.UnsupportedEncodingException e) {
-                response.setHeader("Content-Disposition", "attachment; filename=\"file\"");
-            }
-        }
-        
-        try (FileInputStream fis = new FileInputStream(physicalFile)) {
-            byte[] buffer = new byte[4096];
-            int len;
-            while ((len = fis.read(buffer)) > 0) {
-                response.getOutputStream().write(buffer, 0, len);
-            }
-            System.out.println("请求处理成功：ID=" + id + ", FileName=" + file.getFileName());
 
-            // 记录访问日志
-            AssetAccessLog accessLog = new AssetAccessLog();
-            // 如果前端传了 userId，则使用前端传的，否则使用默认的 2L
-            Long currentUserId = userId != null ? userId : 2L;
-            accessLog.setUserId(currentUserId);
-            accessLog.setFileId(file.getId());
-            accessLog.setProductId(file.getProductId());
-            accessLog.setCreatedAt(java.time.LocalDateTime.now());
-            assetAccessLogService.save(accessLog);
+        // 记录访问日志
+        AssetAccessLog accessLog = new AssetAccessLog();
+        Long currentUserId = headerUserId != null ? headerUserId : (userId != null ? userId : 2L);
+        accessLog.setUserId(currentUserId);
+        accessLog.setFileId(file.getId());
+        accessLog.setProductId(file.getProductId());
+        accessLog.setCreatedAt(java.time.LocalDateTime.now());
+        assetAccessLogService.save(accessLog);
 
-        } catch (IOException e) {
-            System.err.println("输出失败：ID=" + id + ", Error=" + e.getMessage());
-            e.printStackTrace();
+        Resource resource = new FileSystemResource(physicalFile);
+        
+        String contentDisposition = "inline";
+        try {
+            String encodedFileName = java.net.URLEncoder.encode(file.getFileName(), "UTF-8").replaceAll("\\+", "%20");
+            if (download) {
+                contentDisposition = "attachment; filename=\"" + encodedFileName + "\"";
+            } else {
+                // 预览模式下，对于 PDF 建议只返回 inline，不带 filename，以减少浏览器强制下载的概率
+                if ("pdf".equalsIgnoreCase(ext)) {
+                    contentDisposition = "inline";
+                } else {
+                    contentDisposition = "inline; filename=\"" + encodedFileName + "\"";
+                }
+            }
+        } catch (java.io.UnsupportedEncodingException e) {
+            contentDisposition = download ? "attachment; filename=\"file\"" : "inline";
         }
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition)
+                .header(HttpHeaders.ACCEPT_RANGES, "bytes") // 显式声明支持 Range 请求
+                .body(resource);
     }
 
+    /**
+     * 获取最近访问的文件列表
+     */
     @GetMapping("/recent-access")
-    public Result<List<Map<String, Object>>> getRecentAccessedFiles(@RequestParam(value = "userId", required = false) Long userId) {
+    public Result<List<Map<String, Object>>> getRecentAccessedFiles(@RequestHeader(value = "X-User-Id", required = false) Long userId) {
         // 1. 查询最近访问日志，按访问时间倒序
         // 使用 MyBatis-Plus 的自定义 SQL 或聚合查询来去重
         // 这里为了简单，先查询较多记录，然后在内存中去重并分页
@@ -1240,12 +1329,18 @@ public class AssetFileController {
         return Result.success(result);
     }
 
+    /**
+     * OnlyOffice 回调接口
+     */
     @PostMapping("/callback")
     public void callback(@RequestBody Map<String, Object> body) {
         // OnlyOffice 回调，目前仅记录日志
         System.out.println("收到 OnlyOffice 回调: " + body);
     }
 
+    /**
+     * 记录用户阅读状态（消除 New 标）
+     */
     @PostMapping("/record-read-state")
     public Result<Void> recordReadState(@RequestBody Map<String, Long> body) {
         Long fileId = body.get("file_id");
@@ -1290,13 +1385,19 @@ public class AssetFileController {
         return Result.success();
     }
 
+    /**
+     * 获取我的收藏文件列表
+     */
     @GetMapping("/my-stars")
-    public Result<List<AssetFile>> getMyStarredFiles(@RequestParam(defaultValue = "2") Long userId,
+    public Result<List<AssetFile>> getMyStarredFiles(@RequestHeader(value = "X-User-Id", required = false) Long userId,
                                                       @RequestParam(defaultValue = "1") int page,
                                                       @RequestParam(defaultValue = "10") int size) {
+        // 如果前端传了 userId，则使用前端传的，否则使用默认的 2L
+        Long currentUserId = userId != null ? userId : 2L;
+
         // 查询用户收藏，按置顶、排序、创建时间倒序
         LambdaQueryWrapper<UserFileStar> starWrapper = new LambdaQueryWrapper<>();
-        starWrapper.eq(UserFileStar::getUserId, userId);
+        starWrapper.eq(UserFileStar::getUserId, currentUserId);
         starWrapper.orderByDesc(UserFileStar::getIsPinned);
         starWrapper.orderByAsc(UserFileStar::getPinOrder);
         starWrapper.orderByDesc(UserFileStar::getCreatedAt);
@@ -1324,7 +1425,7 @@ public class AssetFileController {
                                             .map(star -> {
                                                 AssetFile file = fileMap.get(star.getFileId());
                                                 if (file != null) {
-                                                    file.setIsNew(isNewFile(file, userId));
+                                                    file.setIsNew(isNewFile(file, currentUserId));
                                                     file.setIsStarred(true); // 既然在收藏列表里，肯定已收藏
                                                     file.setIsPinned(star.getIsPinned()); // 显式设置 isPinned 字段
                                                 }
@@ -1336,21 +1437,27 @@ public class AssetFileController {
         return Result.success(result);
     }
 
+    /**
+     * 收藏文件
+     */
     @PostMapping("/star/{fileId}")
-    public Result<Void> starFile(@PathVariable Long fileId, @RequestParam(defaultValue = "2") Long userId) {
+    public Result<Void> starFile(@PathVariable Long fileId, @RequestHeader(value = "X-User-Id", required = false) Long userId) {
         if (fileId == null) {
             return Result.error("文件ID不能为空");
         }
 
+        // 如果前端传了 userId，则使用前端传的，否则使用默认的 2L
+        Long currentUserId = userId != null ? userId : 2L;
+
         LambdaQueryWrapper<UserFileStar> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(UserFileStar::getUserId, userId);
+        wrapper.eq(UserFileStar::getUserId, currentUserId);
         wrapper.eq(UserFileStar::getFileId, fileId);
         UserFileStar userFileStar = userFileStarService.getOne(wrapper);
 
         if (userFileStar == null) {
             // 收藏
             userFileStar = new UserFileStar();
-            userFileStar.setUserId(userId);
+            userFileStar.setUserId(currentUserId);
             userFileStar.setFileId(fileId);
             userFileStar.setIsPinned(false); // 默认不置顶
             userFileStar.setPinOrder(0);
@@ -1363,29 +1470,41 @@ public class AssetFileController {
         return Result.success();
     }
 
+    /**
+     * 取消收藏文件
+     */
     @DeleteMapping("/star/{fileId}")
-    public Result<Void> unstarFile(@PathVariable Long fileId, @RequestParam(defaultValue = "2") Long userId) {
+    public Result<Void> unstarFile(@PathVariable Long fileId, @RequestHeader(value = "X-User-Id", required = false) Long userId) {
         if (fileId == null) {
             return Result.error("文件ID不能为空");
         }
 
+        // 如果前端传了 userId，则使用前端传的，否则使用默认的 2L
+        Long currentUserId = userId != null ? userId : 2L;
+
         LambdaQueryWrapper<UserFileStar> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(UserFileStar::getUserId, userId);
+        wrapper.eq(UserFileStar::getUserId, currentUserId);
         wrapper.eq(UserFileStar::getFileId, fileId);
         userFileStarService.remove(wrapper);
         return Result.success();
     }
 
+    /**
+     * 置顶或取消置顶收藏文件
+     */
     @PostMapping("/star/{fileId}/pin")
     public Result<Void> pinFile(@PathVariable Long fileId,
-                                @RequestParam(defaultValue = "2") Long userId,
+                                @RequestHeader(value = "X-User-Id", required = false) Long userId,
                                 @RequestParam(defaultValue = "true") boolean pin) {
         if (fileId == null) {
             return Result.error("文件ID不能为空");
         }
 
+        // 如果前端传了 userId，则使用前端传的，否则使用默认的 2L
+        Long currentUserId = userId != null ? userId : 2L;
+
         LambdaQueryWrapper<UserFileStar> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(UserFileStar::getUserId, userId);
+        wrapper.eq(UserFileStar::getUserId, currentUserId);
         wrapper.eq(UserFileStar::getFileId, fileId);
         UserFileStar userFileStar = userFileStarService.getOne(wrapper);
 
@@ -1405,11 +1524,14 @@ public class AssetFileController {
         return Result.success();
     }
 
+    /**
+     * 获取产品的核心资产列表
+     */
     @GetMapping("/curated/{productId}")
-    public Result<List<AssetFile>> getCuratedAssets(@PathVariable Long productId, @RequestParam(value = "userId", required = false) Long userId) {
+    public Result<List<AssetFile>> getCuratedAssets(@PathVariable Long productId, @RequestHeader(value = "X-User-Id", required = false) Long userId) {
         LambdaQueryWrapper<AssetCurated> curatedWrapper = new LambdaQueryWrapper<>();
         curatedWrapper.eq(AssetCurated::getProductId, productId);
-        curatedWrapper.orderByAsc(AssetCurated::getDisplayOrder);
+        curatedWrapper.orderByDesc(AssetCurated::getDisplayOrder); // 改为按 display_order 从大到小排序
 
         List<AssetCurated> curatedList = assetCuratedService.list(curatedWrapper);
 
@@ -1427,7 +1549,7 @@ public class AssetFileController {
         Map<Long, AssetFile> fileMap = files.stream()
                                             .collect(Collectors.toMap(AssetFile::getId, f -> f));
 
-        // 如果前端传了 userId，则使用前端传的，否则使用默认的 2L
+        // 如果前端传了 userId，则使用前端传的，否则使用默认 of 2L
         Long currentUserId = userId != null ? userId : 2L;
 
         List<AssetFile> result = curatedList.stream()
@@ -1446,10 +1568,13 @@ public class AssetFileController {
         return Result.success(result);
     }
 
+    /**
+     * 获取全行最新更新文件列表
+     */
     @GetMapping("/latest-updates")
     public Result<List<AssetFile>> getLatestUpdates(@RequestParam(defaultValue = "1") int page,
                                                      @RequestParam(defaultValue = "10") int size,
-                                                     @RequestParam(value = "userId", required = false) Long userId) {
+                                                     @RequestHeader(value = "X-User-Id", required = false) Long userId) {
         // 查询最近 14 天内更新的文件，按更新时间倒序
         LambdaQueryWrapper<AssetFile> wrapper = new LambdaQueryWrapper<>();
         wrapper.ge(AssetFile::getUpdatedAt, java.time.LocalDateTime.now().minusDays(14));
@@ -1472,10 +1597,13 @@ public class AssetFileController {
         return Result.success(files);
     }
 
+    /**
+     * 获取产品内使用频率最高的文件列表
+     */
     @GetMapping("/product-use-top/{productId}")
     public Result<List<AssetFile>> getProductUseTop(@PathVariable Long productId,
                                                     @RequestParam(defaultValue = "10") int limit,
-                                                    @RequestParam(value = "userId", required = false) Long userId) {
+                                                    @RequestHeader(value = "X-User-Id", required = false) Long userId) {
         List<Map<String, Object>> useTopList = assetAccessLogService.getProductUseTop(productId, limit);
 
         if (useTopList.isEmpty()) {
@@ -1500,9 +1628,9 @@ public class AssetFileController {
                                                Long fileId = Long.valueOf(map.get("file_id").toString());
                                                AssetFile file = fileMap.get(fileId);
                                                if (file != null) {
-                                                   file.setIsNew(isNewFile(file, currentUserId));
-                                                   file.setIsStarred(isStarredFile(file, currentUserId));
-                                                   file.setCurrentUserStarred(isStarredFile(file, currentUserId));
+                                                    file.setIsNew(isNewFile(file, currentUserId));
+                                                    file.setIsStarred(isStarredFile(file, currentUserId));
+                                                    file.setCurrentUserStarred(isStarredFile(file, currentUserId));
                                                }
                                                return file;
                                            })
@@ -1512,18 +1640,17 @@ public class AssetFileController {
         return Result.success(result);
     }
 
+    /**
+     * 批量获取资产详情
+     */
     @PostMapping("/batch-details")
-    public Result<List<AssetFile>> getBatchDetails(@RequestBody Map<String, Object> body) {
+    public Result<List<AssetFile>> getBatchDetails(@RequestBody Map<String, Object> body, @RequestHeader(value = "X-User-Id", required = false) Long userId) {
         List<Long> ids = (List<Long>) body.get("ids");
         if (ids == null || ids.isEmpty()) {
             return Result.success(Collections.emptyList());
         }
         List<AssetFile> files = assetFileService.listByIds(ids);
         
-        Long userId = null;
-        if (body.get("userId") != null) {
-            userId = Long.valueOf(body.get("userId").toString());
-        }
         // 如果前端传了 userId，则使用前端传的，否则使用默认的 2L
         Long currentUserId = userId != null ? userId : 2L;
         
@@ -1535,6 +1662,9 @@ public class AssetFileController {
         return Result.success(files);
     }
 
+    /**
+     * 批量打包下载资产
+     */
     @PostMapping("/download")
     public void download(@RequestBody Map<String, List<Long>> body, HttpServletResponse response) {
         List<Long> ids = body.get("file_ids");
@@ -1667,12 +1797,18 @@ public class AssetFileController {
         }
     }
 
+    /**
+     * 获取产品下的核心资产列表（DTO 格式）
+     */
     @GetMapping("/product/{productId}/curated-assets")
     public Result<List<AssetCurated>> getProductCuratedAssets(@PathVariable Long productId) {
         List<AssetCurated> curatedAssets = assetCuratedService.getCuratedAssetsByProductId(productId);
         return Result.success(curatedAssets);
     }
 
+    /**
+     * 获取产品下的资产使用排行
+     */
     @GetMapping("/product/{productId}/use-ranking")
     public Result<List<ProductUseRankingDTO>> getProductUseRanking(@PathVariable Long productId) {
         List<ProductUseRankingDTO> ranking = productUseRankingService.getProductUseRanking(productId);

@@ -10,27 +10,27 @@ server:
 spring:
   datasource:
     # 生产环境数据库连接地址 (请替换为实际服务器 IP)
-    url: jdbc:mysql://prod-db-host:3306/asset_db?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai
+    url: jdbc:mysql://22.188.9.16:3306/allstar?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai
     # 生产环境数据库用户名
-    username: prod_user
+    username: td
     # 生产环境数据库密码 (务必通过环境变量或加密存储)
-    password: prod_password 
+    password: Mtx0422!
   
   redis:
     # 生产环境 Redis 地址
-    host: prod-redis-host
+    host: 22.188.9.16
     port: 6379
   
   data:
     solr:
       # 生产环境 Solr 服务器地址
-      host: http://prod-solr-host:8983/solr
+      host: http://22.188.9.16:8983/solr
 
 file:
   # 生产环境文件上传存储根目录 (Linux 路径示例)
-  upload-dir: /app/data/asset_files
+  upload-dir: /allstar/app/data/asset_files
   # 生产环境回收站存储目录
-  recycle-bin-dir: /app/data/asset_recycle_bin
+  recycle-bin-dir: /allstar/app/data/asset_recycle_bin
 
 auth:
   # 生产环境开关：强制对内部人员进行密码校验

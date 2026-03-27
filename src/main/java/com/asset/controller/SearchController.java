@@ -22,6 +22,10 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 
+/**
+ * 资产搜索控制器
+ * 处理全文检索、热门搜索词、索引重建及健康检查
+ */
 @RestController
 @RequestMapping("/api/search")
 @CrossOrigin
@@ -42,7 +46,15 @@ public class SearchController {
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
 
-
+    /**
+     * 执行全文搜索
+     * @param keyword 关键词
+     * @param zoneType 专区类型
+     * @param productId 产品 ID
+     * @param page 页码
+     * @param size 每页大小
+     * @return 搜索结果列表
+     */
     @GetMapping
     public Result<List<Map<String, Object>>> search(
             @RequestParam(required = false) String keyword,
@@ -123,6 +135,11 @@ public class SearchController {
         return searchResult;
     }
 
+    /**
+     * 获取热门搜索关键词
+     * @param limit 返回数量限制
+     * @return 热门关键词列表
+     */
     @GetMapping("/hot-keywords")
     public Result<List<AssetHotSearch>> getHotKeywords(@RequestParam(defaultValue = "10") int limit) {
         LambdaQueryWrapper<AssetHotSearch> wrapper = new LambdaQueryWrapper<>();
@@ -133,6 +150,9 @@ public class SearchController {
         return Result.success(hotSearches);
     }
 
+    /**
+     * 索引健康检查：比对数据库文件记录与 Solr 索引文档的一致性
+     */
     @GetMapping("/health-check")
     public Result<Map<String, Object>> healthCheck() {
         // 1. 获取数据库中所有最新版本的文件
@@ -154,6 +174,10 @@ public class SearchController {
         return Result.success(result);
     }
 
+    /**
+     * 重新索引指定文件
+     * @param id 文件 ID
+     */
     @PostMapping("/reindex/{id}")
     public Result<Void> reindex(@PathVariable Long id) {
         AssetFile file = assetFileService.getById(id);
@@ -163,18 +187,28 @@ public class SearchController {
         return Result.success();
     }
 
+    /**
+     * 删除指定 Solr 索引文档
+     * @param solrId Solr 文档 ID
+     */
     @DeleteMapping("/index/{solrId}")
     public Result<Void> deleteIndex(@PathVariable String solrId) {
         searchService.deleteBySolrId(solrId);
         return Result.success();
     }
 
+    /**
+     * 启动全量索引重建任务
+     */
     @PostMapping("/rebuild-all/start")
     public Result<Void> startRebuildAll() {
         searchService.startRebuildAll();
         return Result.success();
     }
 
+    /**
+     * 获取全局使用频率最高的文件排行（从 Redis 获取）
+     */
     @GetMapping("/global-use-top")
     public Result<List<Map<String, Object>>> getGlobalUseTop() {
         String json = stringRedisTemplate.opsForValue().get("global_use_top");
@@ -184,6 +218,9 @@ public class SearchController {
         return Result.success(Collections.emptyList());
     }
 
+    /**
+     * 获取全局收藏频率最高的文件排行（从 Redis 获取）
+     */
     @GetMapping("/global-star-top")
     public Result<List<Map<String, Object>>> getGlobalStarTop() {
         String json = stringRedisTemplate.opsForValue().get("global_star_top");
@@ -193,6 +230,9 @@ public class SearchController {
         return Result.success(Collections.emptyList());
     }
 
+    /**
+     * 获取全量索引重建进度
+     */
     @GetMapping("/rebuild-all/progress")
     public Result<Map<String, Object>> getRebuildProgress() {
         return Result.success(searchService.getRebuildProgress());

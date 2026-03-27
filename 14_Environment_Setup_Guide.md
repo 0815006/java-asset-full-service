@@ -17,6 +17,7 @@ Last_Modified: 2026-03-20
 *   **Java**：JDK 1.8 (必须)
 *   **数据库**：MySQL 8.0+
 *   **搜索引擎**：Apache Solr 8.11 (推荐)
+*   **缓存服务**：Redis 6.0+ (推荐 Docker 部署)
 *   **前端容器**：Nginx 1.18+
 *   **预览服务**：OnlyOffice Document Server (Docker 部署)
 
@@ -44,7 +45,14 @@ Last_Modified: 2026-03-20
     *   修改 `managed-schema`，添加 `text_ik` 类型定义及业务字段映射（详见 `06_Solr_Schema_Configuration.md`）。
 4.  **重启 Solr**：`docker restart asset-solr`。
 
-## 4. 后端服务部署 (SpringBoot)
+## 4. 缓存服务部署 (Redis)
+1.  **启动容器**：
+    ```bash
+    docker run -d -p 6379:6379 --name asset-redis --restart=always redis
+    ```
+2.  **验证连接**：使用 `docker exec -it asset-redis redis-cli ping`，返回 `PONG` 表示正常。
+
+## 5. 后端服务部署 (SpringBoot)
 1.  **打包**：`mvn clean package` 生成 `java-asset-full-service-0.0.1-SNAPSHOT.jar`。
 2.  **环境配置**：系统已内置 `application-prod.yml` 生产环境配置。
     *   **方式 A (推荐)**：启动时激活 `prod` 配置文件，并通过命令行参数覆盖敏感信息。
@@ -56,6 +64,9 @@ Last_Modified: 2026-03-20
         url: jdbc:mysql://<实际数据库IP>:3306/asset_db?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai
         username: <用户名>
         password: <密码>
+      redis:
+        host: <实际RedisIP>
+        port: 6379
       data:
         solr:
           host: http://<实际SolrIP>:8983/solr
@@ -68,18 +79,18 @@ Last_Modified: 2026-03-20
     nohup java -jar java-asset-full-service-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod > app.log 2>&1 &
     ```
 
-## 5. 前端服务部署 (Vue + Nginx)
+## 6. 前端服务部署 (Vue + Nginx)
 1.  **打包**：`npm run build` 生成 `dist/` 目录。
 2.  **Nginx 配置**：
     ```nginx
     server {
-        listen 80;
+        listen 8011;
         server_name asset.bank.com;
 
         location / {
             root /var/www/asset-web/dist;
             index index.html;
-            try_files $uri $uri/ /index.html; # 支持 History 模式
+            # 支持 hash 模式
         }
 
         location /api {
@@ -90,15 +101,17 @@ Last_Modified: 2026-03-20
     }
     ```
 
-## 6. 预览服务部署 (OnlyOffice)
+## 7. 预览服务部署 (OnlyOffice)
 ```bash
-docker run -i -t -d -p 9000:80 \
+docker run -i -t -d -p 9010:80 \
+    --security-opt seccomp=unconfined \
+    --name asset-onlyoffice \
     -e JWT_ENABLED=false \
     -e ALLOW_PRIVATE_IP_ADDRESS=true \
     --restart=always onlyoffice/documentserver
 ```
 
-## 7. 生产环境复核清单
+## 8. 生产环境复核清单
 *   [ ] **安全**：修改 `auth.secret-key` 为随机强密钥。
 *   [ ] **权限**：确保 `upload-dir` 目录对 Java 进程有读写权限。
 *   [ ] **索引**：登录系统后，手动触发一次“全量重建索引”。
