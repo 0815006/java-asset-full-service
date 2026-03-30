@@ -1,5 +1,6 @@
 package com.asset.controller;
 
+import com.asset.common.PageResult;
 import com.asset.common.Result;
 import com.asset.entity.AssetFile;
 import com.asset.entity.Product;
@@ -56,17 +57,18 @@ public class SearchController {
      * @return 搜索结果列表
      */
     @GetMapping
-    public Result<List<Map<String, Object>>> search(
+    public Result<PageResult<Map<String, Object>>> search(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String zoneType,
             @RequestParam(required = false) Long productId,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int size) {
 
-        Result<List<Map<String, Object>>> searchResult = searchService.search(keyword, zoneType, productId, page, size);
+        Result<PageResult<Map<String, Object>>> searchResult = searchService.search(keyword, zoneType, productId, page, size);
 
         if (searchResult.getCode() == 200) {
-            List<Map<String, Object>> results = searchResult.getData();
+            PageResult<Map<String, Object>> pageData = searchResult.getData();
+            List<Map<String, Object>> results = pageData != null ? pageData.getList() : null;
 
             if (results != null) {
                 // 提取所有 product_id

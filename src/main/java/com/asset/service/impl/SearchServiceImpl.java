@@ -1,5 +1,6 @@
 package com.asset.service.impl;
 
+import com.asset.common.PageResult;
 import com.asset.common.Result;
 import com.asset.entity.AssetFile;
 import com.asset.mapper.AssetFileMapper;
@@ -206,7 +207,7 @@ public class SearchServiceImpl implements SearchService {
     }
 
     @Override
-    public Result<List<Map<String, Object>>> search(String keyword, String searchZoneType, Long productId, int page, int size) {
+    public Result<PageResult<Map<String, Object>>> search(String keyword, String searchZoneType, Long productId, int page, int size) {
         try {
             SolrQuery query = new SolrQuery();
             StringBuilder queryStr = new StringBuilder();
@@ -240,6 +241,7 @@ public class SearchServiceImpl implements SearchService {
 
             QueryResponse response = solrClient.query("file_search", query);
             SolrDocumentList results = response.getResults();
+            long total = results.getNumFound();
             Map<String, Map<String, List<String>>> highlighting = response.getHighlighting();
 
             List<Map<String, Object>> list = new ArrayList<>();
@@ -286,7 +288,7 @@ public class SearchServiceImpl implements SearchService {
                 }
                 list.add(map);
             }
-            return Result.success(list);
+            return Result.success(PageResult.of(list, total));
         } catch (Exception e) {
             System.err.println("Solr 搜索失败，尝试切换到数据库模糊搜索: " + e.getMessage());
             // Fallback does not support zoneType yet, but it's a fallback.
@@ -333,7 +335,7 @@ public class SearchServiceImpl implements SearchService {
         return progress;
     }
 
-    private Result<List<Map<String, Object>>> databaseSearchFallback(String keyword, String zoneType, Long productId, int page, int size) {
+    private Result<PageResult<Map<String, Object>>> databaseSearchFallback(String keyword, String zoneType, Long productId, int page, int size) {
         LambdaQueryWrapper<AssetFile> wrapper = new LambdaQueryWrapper<AssetFile>()
                 .eq(AssetFile::getIsLatest, 1)
                 .eq(AssetFile::getNodeType, 2);
@@ -360,7 +362,17 @@ public class SearchServiceImpl implements SearchService {
         }
         
         // 简单分页
-        List<AssetFile> files = assetFileMapper.selectList(wrapper);
+        List<AssetFile> allFiles = assetFileMapper.selectList(wrapper);
+        long total = allFiles.size();
+        
+        // 手动内存分页
+        int fromIndex = (page - 1) * size;
+        int toIndex = Math.min(fromIndex + size, allFiles.size());
+        
+        List<AssetFile> files = new ArrayList<>();
+        if (fromIndex < allFiles.size()) {
+            files = allFiles.subList(fromIndex, toIndex);
+        }
         
         List<Map<String, Object>> list = new ArrayList<>();
         for (AssetFile file : files) {
@@ -374,6 +386,6 @@ public class SearchServiceImpl implements SearchService {
             map.put("highlight", "文件名匹配: " + file.getFileName());
             list.add(map);
         }
-        return Result.success(list);
+        return Result.success(PageResult.of(list, total));
     }
 }
