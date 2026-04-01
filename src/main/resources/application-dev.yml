@@ -28,9 +28,9 @@ spring:
 
 file:
   # 本地文件上传存储根目录 (Windows 路径示例)
-  upload-dir: /root/asset/data/asset_files
+  upload-dir: D:/data/asset_files
   # 本地回收站存储目录
-  recycle-bin-dir: /root/asset/data/asset_recycle_bin
+  recycle-bin-dir: D:/data/asset_recycle_bin
 
 auth:
   # 开发环境开关：是否对内部人员(role_type 1,2,3)校验密码

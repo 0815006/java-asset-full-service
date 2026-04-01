@@ -58,12 +58,30 @@ public class ProductController {
     public Result<List<Product>> list(@RequestHeader(value = "X-User-Id", required = false) Long userId) {
         List<Product> products = productService.list();
         
-        // Populate ownerName
-        List<Long> userIds = products.stream().map(Product::getOwnerId).distinct().collect(Collectors.toList());
-        if (!userIds.isEmpty()) {
-            Map<Long, String> userMap = userService.listByIds(userIds).stream()
+        // Populate ownerName (支持多负责人)
+        List<Long> allOwnerIds = products.stream()
+            .filter(p -> p.getOwnerIds() != null && !p.getOwnerIds().isEmpty())
+            .flatMap(p -> Arrays.stream(p.getOwnerIds().split(",")))
+            .map(String::trim)
+            .filter(id -> !id.isEmpty())
+            .map(Long::parseLong)
+            .distinct()
+            .collect(Collectors.toList());
+
+        if (!allOwnerIds.isEmpty()) {
+            Map<Long, String> userMap = userService.listByIds(allOwnerIds).stream()
                 .collect(Collectors.toMap(User::getId, User::getRealName));
-            products.forEach(p -> p.setOwnerName(userMap.get(p.getOwnerId())));
+            
+            products.forEach(p -> {
+                if (p.getOwnerIds() != null && !p.getOwnerIds().isEmpty()) {
+                    String names = Arrays.stream(p.getOwnerIds().split(","))
+                        .map(String::trim)
+                        .filter(id -> !id.isEmpty())
+                        .map(id -> userMap.getOrDefault(Long.parseLong(id), "未知用户"))
+                        .collect(Collectors.joining(","));
+                    p.setOwnerName(names);
+                }
+            });
         }
         
         if (userId != null) {

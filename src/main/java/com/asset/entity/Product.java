@@ -19,7 +19,7 @@ public class Product {
 
     private String domainName;
 
-    private Long ownerId;
+    private String ownerIds;
 
     private Integer assetCount;
 

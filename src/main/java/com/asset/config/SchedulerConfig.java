@@ -55,12 +55,14 @@ public class SchedulerConfig {
     @Scheduled(cron = "0 0 * * * ?")
     public void aggregateTopLists() {
         // 聚合“全行使用榜”
-        List<Map<String, Object>> globalUseTop = assetAccessLogService.getGlobalUseTop(10);
+        // 增加到 20 条，以便前端过滤掉失效文件后仍能尽量保持 10 条显示
+        List<Map<String, Object>> globalUseTop = assetAccessLogService.getGlobalUseTop(20);
         stringRedisTemplate.opsForValue().set("global_use_top", com.alibaba.fastjson.JSON.toJSONString(globalUseTop));
         System.out.println("聚合了全行使用榜数据。");
 
         // 聚合“资产人气榜”
-        List<Map<String, Object>> globalStarTop = userFileStarService.getGlobalStarTop(10);
+        // 增加到 20 条
+        List<Map<String, Object>> globalStarTop = userFileStarService.getGlobalStarTop(20);
         stringRedisTemplate.opsForValue().set("global_star_top", com.alibaba.fastjson.JSON.toJSONString(globalStarTop));
         System.out.println("聚合了资产人气榜数据。获取到 " + globalStarTop.size() + " 条数据。存入 Redis 的 JSON: " + com.alibaba.fastjson.JSON.toJSONString(globalStarTop));
     }
